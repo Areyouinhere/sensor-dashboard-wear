@@ -27,11 +27,13 @@ jobs:
           yes | sdkmanager --licenses
           sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Build Debug APK (no wrapper)
-        uses: gradle/gradle-build-action@v3
-        with:
-          gradle-version: 8.7
-          arguments: :app:assembleDebug
+      # New action (replaces gradle/gradle-build-action)
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Use the Gradle CLI (no wrapper needed)
+      - name: Build Debug APK
+        run: gradle :app:assembleDebug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
