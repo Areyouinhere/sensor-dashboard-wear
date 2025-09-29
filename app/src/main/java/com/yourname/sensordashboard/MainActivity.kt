@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 @Composable
 private fun Dashboard(available: List<String>, readings: Map<String, String>) {
     val readingItems = readings.entries.sortedBy { it.key }
-    ScalingLazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp), autoCentering = true) {
+    ScalingLazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp), autoCentering = AutoCenteringParams) {
         item { Text("Sensor Dashboard", maxLines = 1, overflow = TextOverflow.Ellipsis) }
         items(readingItems) { (name, value) ->
             Spacer(Modifier.height(6.dp)); Text("$name: $value", maxLines = 2, overflow = TextOverflow.Ellipsis)
