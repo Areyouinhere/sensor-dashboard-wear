@@ -1,7 +1,6 @@
 package com.yourname.sensordashboard
 
 import androidx.compose.ui.text.font.FontWeight
-import androidx.wear.compose.material.Divider
 import kotlin.math.min
 import android.Manifest
 import android.content.Context
