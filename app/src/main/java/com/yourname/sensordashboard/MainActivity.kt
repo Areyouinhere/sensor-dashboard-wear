@@ -216,6 +216,16 @@ private fun SensorRow(name: String, value: String) {
 }
 
 @Composable
+private fun Separator() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(Color(0x33FFFFFF))  // subtle line
+    )
+}
+
+@Composable
 private fun Dashboard(
     available: List<String>,
     readings: Map<String, String>
@@ -235,7 +245,7 @@ private fun Dashboard(
         items(readingItems) { (name, value) ->
             SensorRow(name = name, value = value)
             Spacer(Modifier.height(4.dp))
-            Divider(color = Color(0x33FFFFFF)) // subtle separator
+            Separator(color = Color(0x33FFFFFF)) // subtle separator
             Spacer(Modifier.height(4.dp))
         }
 
