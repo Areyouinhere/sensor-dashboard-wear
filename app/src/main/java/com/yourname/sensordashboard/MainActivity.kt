@@ -1,6 +1,7 @@
 package com.yourname.sensordashboard
 
 import androidx.wear.compose.material.AutoCenteringParams
+import kotlin.math.sqrt
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -64,29 +65,70 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         } else subscribeSensors()
     }
 
-    private fun subscribeSensors() {
-        sensorManager.unregisterListener(this)
-        fun reg(type: Int, delay: Int = SensorManager.SENSOR_DELAY_NORMAL) {
-            sensorManager.getDefaultSensor(type)?.let { sensorManager.registerListener(this, it, delay) }
+private fun subscribeSensors() {
+    sensorManager.unregisterListener(this)
+
+    fun reg(type: Int, delay: Int = SensorManager.SENSOR_DELAY_NORMAL) {
+        sensorManager.getDefaultSensor(type)?.let {
+            sensorManager.registerListener(this, it, delay)
         }
-        reg(Sensor.TYPE_ACCELEROMETER)
-        reg(Sensor.TYPE_GYROSCOPE)
-        reg(Sensor.TYPE_STEP_COUNTER)
-        reg(Sensor.TYPE_HEART_RATE)
     }
 
+    // Motion / orientation
+    reg(Sensor.TYPE_ACCELEROMETER)
+    reg(Sensor.TYPE_GYROSCOPE)
+    reg(Sensor.TYPE_LINEAR_ACCELERATION)
+    reg(Sensor.TYPE_GRAVITY)
+    reg(Sensor.TYPE_ROTATION_VECTOR)
+
+    // Environment (watch may not have all; safe no-ops if missing)
+    reg(Sensor.TYPE_MAGNETIC_FIELD)
+    reg(Sensor.TYPE_LIGHT)
+    reg(Sensor.TYPE_PRESSURE)
+    reg(Sensor.TYPE_RELATIVE_HUMIDITY)
+    reg(Sensor.TYPE_AMBIENT_TEMPERATURE)
+
+    // Activity / biometrics
+    reg(Sensor.TYPE_STEP_COUNTER)
+    reg(Sensor.TYPE_HEART_RATE) // requires BODY_SENSORS permission
+}
+
+private fun formatTriple(values: FloatArray): String {
+    return when (values.size) {
+        3 -> {
+            val (x, y, z) = values
+            val mag = sqrt(x*x + y*y + z*z)
+            "[x=%.2f, y=%.2f, z=%.2f | |v|=%.2f]".format(x, y, z, mag)
+        }
+        2 -> "[%.2f, %.2f]".format(values[0], values[1])
+        1 -> "[%.2f]".format(values[0])
+        else -> values.joinToString(prefix = "[", postfix = "]") { "%.2f".format(it) }
+    }
+}
+
+private fun labelFor(type: Int): String = when (type) {
+    Sensor.TYPE_ACCELEROMETER      -> "Accelerometer (m/s²)"
+    Sensor.TYPE_GYROSCOPE          -> "Gyroscope (rad/s)"
+    Sensor.TYPE_LINEAR_ACCELERATION-> "Linear Accel (m/s²)"
+    Sensor.TYPE_GRAVITY            -> "Gravity (m/s²)"
+    Sensor.TYPE_ROTATION_VECTOR    -> "Rotation Vector"
+    Sensor.TYPE_MAGNETIC_FIELD     -> "Magnetic (µT)"
+    Sensor.TYPE_LIGHT              -> "Light (lux)"
+    Sensor.TYPE_PRESSURE           -> "Pressure (hPa)"
+    Sensor.TYPE_RELATIVE_HUMIDITY  -> "Humidity (%)"
+    Sensor.TYPE_AMBIENT_TEMPERATURE-> "Ambient Temp (°C)"
+    Sensor.TYPE_HEART_RATE         -> "Heart Rate (bpm)"
+    Sensor.TYPE_STEP_COUNTER       -> "Step Counter (steps)"
+    else -> "Type $type"
+}
+
+    
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     override fun onSensorChanged(event: SensorEvent) {
-        val key = when (event.sensor.type) {
-            Sensor.TYPE_ACCELEROMETER -> "Accelerometer (m/s²)"
-            Sensor.TYPE_GYROSCOPE -> "Gyroscope (rad/s)"
-            Sensor.TYPE_STEP_COUNTER -> "Step Counter (steps)"
-            Sensor.TYPE_HEART_RATE -> "Heart Rate (bpm)"
-            else -> "Type ${event.sensor.type}"
-        }
-        val value = event.values.joinToString(prefix = "[", postfix = "]") { "%.2f".format(it) }
-        sensorValues[key] = value
-    }
+    val name = labelFor(event.sensor.type)
+    val valueStr = formatTriple(event.values)
+    sensorValues[name] = valueStr
+}
 
     override fun onDestroy() { super.onDestroy(); sensorManager.unregisterListener(this) }
 }
