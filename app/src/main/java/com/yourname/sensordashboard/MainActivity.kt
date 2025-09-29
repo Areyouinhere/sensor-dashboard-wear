@@ -1,6 +1,7 @@
 package com.yourname.sensordashboard
 
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
 import kotlin.math.min
 import android.Manifest
 import android.content.Context
@@ -197,9 +198,13 @@ private fun SensorRow(name: String, value: String) {
     val barColor = heatColor01(pct)
 
     Column(Modifier.fillMaxWidth()) {
-        Text(name, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(name, color =     style = TextStyle(color = Color.White),
+    fontWeight = FontWeight.Bold
+), maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(2.dp))
-        Text(value, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(value, color = style = TextStyle(color = Color.White),
+    fontWeight = FontWeight.Bold
+), maxLines = 2, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(4.dp))
         // background track
         Box(Modifier.fillMaxWidth().height(4.dp).background(Color(0x33FFFFFF))) {
@@ -239,7 +244,9 @@ private fun Dashboard(
     )
 
     ScalingLazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-        item { Text("Sensor Dashboard", color = Color.White, fontWeight = FontWeight.Bold) }
+        item { Text("Sensor Dashboard", style = TextStyle(color = Color.White),
+    fontWeight = FontWeight.Bold
+) }
 
         items(readingItems) { (name, value) ->
             SensorRow(name = name, value = value)
@@ -251,7 +258,9 @@ private fun Dashboard(
         item { Spacer(Modifier.height(10.dp)) }
         item { Text("Available Sensors (${available.size})", color = Color.Gray, fontWeight = FontWeight.SemiBold) }
         items(available.take(30)) { line ->
-            Text(line, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(line, style = TextStyle(color = Color.Gray),
+    fontWeight = FontWeight.Bold
+), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -264,7 +273,9 @@ private fun MagnitudeBar(label: String, values: String) {
     val pct = clamped / 20f
 
     Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-        Text("$label: $values", color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text("$label: $values", style = TextStyle(color = Color.White),
+    fontWeight = FontWeight.Bold
+), maxLines = 2, overflow = TextOverflow.Ellipsis)
         Box(Modifier.fillMaxWidth().height(4.dp).background(Color.DarkGray)) {
             Box(Modifier.fillMaxWidth(pct).height(4.dp).background(Color.Gray))
         }
