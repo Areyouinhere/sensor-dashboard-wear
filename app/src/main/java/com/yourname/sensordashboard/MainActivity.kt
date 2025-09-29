@@ -1,25 +1,41 @@
 package com.yourname.sensordashboard
 
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.TextStyle
-import kotlin.math.min
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.hardware.*
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.wear.compose.material.*
+import androidx.wear.compose.material.MaterialTheme
+import androidx.wear.compose.material.ScalingLazyColumn
+import androidx.wear.compose.material.Text
+import androidx.wear.compose.material.items
+import kotlin.math.min
 import kotlin.math.sqrt
 
 class MainActivity : ComponentActivity(), SensorEventListener {
@@ -41,7 +57,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black)   // Dark background
+                        .background(Color.Black)
                 ) {
                     Dashboard(availableSensors, sensorValues)
                 }
@@ -49,7 +65,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
 
         availableSensors = sensorManager.getSensorList(Sensor.TYPE_ALL)
-            .map { "${it.name} (type ${it.type})" }.sorted()
+            .map { "${it.name} (type ${it.type})" }
+            .sorted()
 
         ensurePermissionsThenSubscribe()
     }
@@ -90,7 +107,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         reg(Sensor.TYPE_GRAVITY)
         reg(Sensor.TYPE_ROTATION_VECTOR)
 
-        // Environment
+        // Environment (may not all exist; safe no-ops if missing)
         reg(Sensor.TYPE_MAGNETIC_FIELD)
         reg(Sensor.TYPE_LIGHT)
         reg(Sensor.TYPE_PRESSURE)
@@ -116,68 +133,51 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     }
 }
 
-// ---------- UI + helpers ----------
+/* ---------- UI ---------- */
 
-private fun formatTriple(values: FloatArray): String {
-    return when (values.size) {
-        3 -> {
-            val (x, y, z) = values
-            val mag = sqrt(x * x + y * y + z * z)
-            "[x=%.1f, y=%.1f, z=%.1f | |v|=%.1f]".format(x, y, z, mag)
-        }
-        2 -> "[%.1f, %.1f]".format(values[0], values[1])
-        1 -> "[%.1f]".format(values[0])
-        else -> values.joinToString(prefix = "[", postfix = "]") { "%.1f".format(it) }
-    }
-}
+@Composable
+private fun Dashboard(
+    available: List<String>,
+    readings: Map<String, String>
+) {
+    val ordered = listOf(
+        "Accelerometer", "Linear Accel", "Gravity", "Gyroscope",
+        "Rotation Vector", "Magnetic", "Light", "Pressure",
+        "Humidity", "Ambient Temp", "Heart Rate", "Step Counter"
+    )
+    val readingItems = readings.entries.sortedWith(
+        compareBy({ ordered.indexOf(it.key).let { i -> if (i == -1) Int.MAX_VALUE else i } }, { it.key })
+    )
 
-private fun labelFor(type: Int): String = when (type) {
-    Sensor.TYPE_ACCELEROMETER      -> "Accelerometer"
-    Sensor.TYPE_GYROSCOPE          -> "Gyroscope"
-    Sensor.TYPE_LINEAR_ACCELERATION-> "Linear Accel"
-    Sensor.TYPE_GRAVITY            -> "Gravity"
-    Sensor.TYPE_ROTATION_VECTOR    -> "Rotation Vector"
-    Sensor.TYPE_MAGNETIC_FIELD     -> "Magnetic"
-    Sensor.TYPE_LIGHT              -> "Light"
-    Sensor.TYPE_PRESSURE           -> "Pressure"
-    Sensor.TYPE_RELATIVE_HUMIDITY  -> "Humidity"
-    Sensor.TYPE_AMBIENT_TEMPERATURE-> "Ambient Temp"
-    Sensor.TYPE_HEART_RATE         -> "Heart Rate"
-    Sensor.TYPE_STEP_COUNTER       -> "Step Counter"
-    else -> "Type $type"
-}
-private fun parseMag(values: String): Float {
-    // expects "... | |v|=12.34]"
-    return Regex("""\|v\|=([0-9.]+)""")
-        .find(values)?.groupValues?.get(1)?.toFloatOrNull() ?: 0f
-}
-
-/** 0.0 -> cool (teal) … 0.5 -> mid (yellow) … 1.0 -> hot (red) */
-private fun heatColor01(x: Float): Color {
-    val t = x.coerceIn(0f, 1f)
-    // simple 2-stop gradient: yellow<->red; prepend a cool phase from teal to yellow
-    return when {
-        t < 0.5f -> {
-            // 0..0.5 : teal(0,180,180) -> yellow(255,215,0)
-            val k = t / 0.5f
-            Color(
-                (0 + (255 - 0) * k).toInt(),
-                (180 + (215 - 180) * k).toInt(),
-                (180 + (0 - 180) * k).toInt()
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize().padding(8.dp)
+    ) {
+        item {
+            Text(
+                "Sensor Dashboard",
+                fontWeight = FontWeight.Bold
             )
         }
-        else -> {
-            // 0.5..1.0 : yellow(255,215,0) -> red(255,64,64)
-            val k = (t - 0.5f) / 0.5f
-            Color(
-                255,
-                (215 + (64 - 215) * k).toInt(),
-                (0 + (64 - 0) * k).toInt()
+
+        items(readingItems) { (name, value) ->
+            SensorRow(name = name, value = value)
+            Spacer(Modifier.height(4.dp))
+            Separator()
+            Spacer(Modifier.height(4.dp))
+        }
+
+        item { Spacer(Modifier.height(10.dp)) }
+        item {
+            Text(
+                "Available Sensors (${available.size})",
+                fontWeight = FontWeight.SemiBold
             )
+        }
+        items(available.take(30)) { line ->
+            Text(line, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
-
 
 @Composable
 private fun SensorRow(name: String, value: String) {
@@ -198,16 +198,17 @@ private fun SensorRow(name: String, value: String) {
     val barColor = heatColor01(pct)
 
     Column(Modifier.fillMaxWidth()) {
-        Text(name, color =     style = TextStyle(color = Color.White),
-    fontWeight = FontWeight.Bold
-), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            name,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
         Spacer(Modifier.height(2.dp))
-        Text(value, color = style = TextStyle(color = Color.White),
-    fontWeight = FontWeight.Bold
-), maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(value, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(4.dp))
         // background track
-        Box(Modifier.fillMaxWidth().height(4.dp).background(Color(0x33FFFFFF))) {
+        Box(Modifier.fillMaxWidth().height(4.dp).background(Color(0x33, 0xFF, 0xFF))) {
             // heat bar
             Box(
                 Modifier
@@ -225,59 +226,65 @@ private fun Separator() {
         Modifier
             .fillMaxWidth()
             .height(1.dp)
-            .background(Color(0x33FFFFFF))  // subtle line
+            .background(Color(0x33, 0xFF, 0xFF)) // subtle line (semi-transparent white)
     )
 }
 
-@Composable
-private fun Dashboard(
-    available: List<String>,
-    readings: Map<String, String>
-) {
-    val ordered = listOf(
-        "Accelerometer", "Linear Accel", "Gravity", "Gyroscope",
-        "Rotation Vector", "Magnetic", "Light", "Pressure",
-        "Humidity", "Ambient Temp", "Heart Rate", "Step Counter"
-    )
-    val readingItems = readings.entries.sortedWith(
-        compareBy({ ordered.indexOf(it.key).let { i -> if (i == -1) Int.MAX_VALUE else i } }, { it.key })
-    )
+/* ---------- helpers ---------- */
 
-    ScalingLazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-        item { Text("Sensor Dashboard", style = TextStyle(color = Color.White),
-    fontWeight = FontWeight.Bold
-) }
+private fun parseMag(values: String): Float {
+    // expects "... | |v|=12.34]"
+    return Regex("""\|v\|=([0-9.]+)""")
+        .find(values)?.groupValues?.get(1)?.toFloatOrNull() ?: 0f
+}
 
-        items(readingItems) { (name, value) ->
-            SensorRow(name = name, value = value)
-            Spacer(Modifier.height(4.dp))
-            Separator(color = Color(0x33FFFFFF)) // subtle separator
-            Spacer(Modifier.height(4.dp))
-        }
-
-        item { Spacer(Modifier.height(10.dp)) }
-        item { Text("Available Sensors (${available.size})", color = Color.Gray, fontWeight = FontWeight.SemiBold) }
-        items(available.take(30)) { line ->
-            Text(line, style = TextStyle(color = Color.Gray),
-    fontWeight = FontWeight.Bold
-), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+/** 0.0 -> teal   … 0.5 -> yellow … 1.0 -> red  */
+private fun heatColor01(x: Float): Color {
+    val t = x.coerceIn(0f, 1f)
+    return if (t < 0.5f) {
+        // 0..0.5 : teal(0,180,180) -> yellow(255,215,0)
+        val k = t / 0.5f
+        Color(
+            (0 + (255 - 0) * k).toInt(),
+            (180 + (215 - 180) * k).toInt(),
+            (180 + (0 - 180) * k).toInt()
+        )
+    } else {
+        // 0.5..1.0 : yellow(255,215,0) -> red(255,64,64)
+        val k = (t - 0.5f) / 0.5f
+        Color(
+            255,
+            (215 + (64 - 215) * k).toInt(),
+            (0 + (64 - 0) * k).toInt()
+        )
     }
 }
 
-
-@Composable
-private fun MagnitudeBar(label: String, values: String) {
-    val mag = Regex("""\|v\|=([0-9.]+)""").find(values)?.groupValues?.get(1)?.toFloatOrNull() ?: 0f
-    val clamped = mag.coerceIn(0f, 20f)
-    val pct = clamped / 20f
-
-    Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-        Text("$label: $values", style = TextStyle(color = Color.White),
-    fontWeight = FontWeight.Bold
-), maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Box(Modifier.fillMaxWidth().height(4.dp).background(Color.DarkGray)) {
-            Box(Modifier.fillMaxWidth(pct).height(4.dp).background(Color.Gray))
+private fun formatTriple(values: FloatArray): String {
+    return when (values.size) {
+        3 -> {
+            val (x, y, z) = values
+            val mag = sqrt(x * x + y * y + z * z)
+            "[x=%.2f, y=%.2f, z=%.2f | |v|=%.2f]".format(x, y, z, mag)
         }
+        2 -> "[%.2f, %.2f]".format(values[0], values[1])
+        1 -> "[%.2f]".format(values[0])
+        else -> values.joinToString(prefix = "[", postfix = "]") { "%.2f".format(it) }
     }
+}
+
+private fun labelFor(type: Int): String = when (type) {
+    Sensor.TYPE_ACCELEROMETER       -> "Accelerometer"
+    Sensor.TYPE_GYROSCOPE           -> "Gyroscope"
+    Sensor.TYPE_LINEAR_ACCELERATION -> "Linear Accel"
+    Sensor.TYPE_GRAVITY             -> "Gravity"
+    Sensor.TYPE_ROTATION_VECTOR     -> "Rotation Vector"
+    Sensor.TYPE_MAGNETIC_FIELD      -> "Magnetic"
+    Sensor.TYPE_LIGHT               -> "Light"
+    Sensor.TYPE_PRESSURE            -> "Pressure"
+    Sensor.TYPE_RELATIVE_HUMIDITY   -> "Humidity"
+    Sensor.TYPE_AMBIENT_TEMPERATURE -> "Ambient Temp"
+    Sensor.TYPE_HEART_RATE          -> "Heart Rate"
+    Sensor.TYPE_STEP_COUNTER        -> "Step Counter"
+    else -> "Type $type"
 }
