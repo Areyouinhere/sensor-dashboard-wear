@@ -1,5 +1,8 @@
 package com.yourname.sensordashboard
 
+import androidx.compose.ui.text.font.FontWeight
+import androidx.wear.compose.material.Divider
+import kotlin.math.min
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -120,11 +123,11 @@ private fun formatTriple(values: FloatArray): String {
         3 -> {
             val (x, y, z) = values
             val mag = sqrt(x * x + y * y + z * z)
-            "[x=%.2f, y=%.2f, z=%.2f | |v|=%.2f]".format(x, y, z, mag)
+            "[x=%.1f, y=%.1f, z=%.1f | |v|=%.1f]".format(x, y, z, mag)
         }
-        2 -> "[%.2f, %.2f]".format(values[0], values[1])
-        1 -> "[%.2f]".format(values[0])
-        else -> values.joinToString(prefix = "[", postfix = "]") { "%.2f".format(it) }
+        2 -> "[%.1f, %.1f]".format(values[0], values[1])
+        1 -> "[%.1f]".format(values[0])
+        else -> values.joinToString(prefix = "[", postfix = "]") { "%.1f".format(it) }
     }
 }
 
@@ -143,34 +146,107 @@ private fun labelFor(type: Int): String = when (type) {
     Sensor.TYPE_STEP_COUNTER       -> "Step Counter"
     else -> "Type $type"
 }
+private fun parseMag(values: String): Float {
+    // expects "... | |v|=12.34]"
+    return Regex("""\|v\|=([0-9.]+)""")
+        .find(values)?.groupValues?.get(1)?.toFloatOrNull() ?: 0f
+}
+
+/** 0.0 -> cool (teal) … 0.5 -> mid (yellow) … 1.0 -> hot (red) */
+private fun heatColor01(x: Float): Color {
+    val t = x.coerceIn(0f, 1f)
+    // simple 2-stop gradient: yellow<->red; prepend a cool phase from teal to yellow
+    return when {
+        t < 0.5f -> {
+            // 0..0.5 : teal(0,180,180) -> yellow(255,215,0)
+            val k = t / 0.5f
+            Color(
+                (0 + (255 - 0) * k).toInt(),
+                (180 + (215 - 180) * k).toInt(),
+                (180 + (0 - 180) * k).toInt()
+            )
+        }
+        else -> {
+            // 0.5..1.0 : yellow(255,215,0) -> red(255,64,64)
+            val k = (t - 0.5f) / 0.5f
+            Color(
+                255,
+                (215 + (64 - 215) * k).toInt(),
+                (0 + (64 - 0) * k).toInt()
+            )
+        }
+    }
+}
+
+
+@Composable
+private fun SensorRow(name: String, value: String) {
+    val mag = parseMag(value)
+
+    // crude per-sensor scaling so the bar feels alive; tweak as desired
+    val scale = when {
+        name.startsWith("Accelerometer") || name.startsWith("Linear Accel") || name.startsWith("Gravity") -> 20f
+        name.startsWith("Gyroscope") -> 5f
+        name.startsWith("Magnetic") -> 120f
+        name.startsWith("Light") -> 1000f
+        name.startsWith("Pressure") -> 1100f
+        name.startsWith("Heart Rate") -> 200f
+        name.startsWith("Step Counter") -> 20000f
+        else -> 50f
+    }
+    val pct = (mag / scale).coerceIn(0f, 1f)
+    val barColor = heatColor01(pct)
+
+    Column(Modifier.fillMaxWidth()) {
+        Text(name, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(2.dp))
+        Text(value, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(4.dp))
+        // background track
+        Box(Modifier.fillMaxWidth().height(4.dp).background(Color(0x33FFFFFF))) {
+            // heat bar
+            Box(
+                Modifier
+                    .fillMaxWidth(min(1f, pct))
+                    .height(4.dp)
+                    .background(barColor)
+            )
+        }
+    }
+}
 
 @Composable
 private fun Dashboard(
     available: List<String>,
     readings: Map<String, String>
 ) {
-    val readingItems = readings.entries.sortedBy { it.key }
-    ScalingLazyColumn(
-        modifier = Modifier.fillMaxSize().padding(8.dp)
-    ) {
-        item { Text("Sensor Dashboard", color = Color.White, maxLines = 1) }
+    val ordered = listOf(
+        "Accelerometer", "Linear Accel", "Gravity", "Gyroscope",
+        "Rotation Vector", "Magnetic", "Light", "Pressure",
+        "Humidity", "Ambient Temp", "Heart Rate", "Step Counter"
+    )
+    val readingItems = readings.entries.sortedWith(
+        compareBy({ ordered.indexOf(it.key).let { i -> if (i == -1) Int.MAX_VALUE else i } }, { it.key })
+    )
+
+    ScalingLazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+        item { Text("Sensor Dashboard", color = Color.White, fontWeight = FontWeight.Bold) }
 
         items(readingItems) { (name, value) ->
-            Spacer(Modifier.height(6.dp))
-            if (name in listOf("Accelerometer", "Gyroscope", "Linear Accel", "Gravity")) {
-                MagnitudeBar(name, value)
-            } else {
-                Text("$name: $value", color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
+            SensorRow(name = name, value = value)
+            Spacer(Modifier.height(4.dp))
+            Divider(color = Color(0x33FFFFFF)) // subtle separator
+            Spacer(Modifier.height(4.dp))
         }
 
-        item { Spacer(Modifier.height(12.dp)) }
-        item { Text("Available Sensors (${available.size})", color = Color.Gray) }
+        item { Spacer(Modifier.height(10.dp)) }
+        item { Text("Available Sensors (${available.size})", color = Color.Gray, fontWeight = FontWeight.SemiBold) }
         items(available.take(30)) { line ->
             Text(line, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
+
 
 @Composable
 private fun MagnitudeBar(label: String, values: String) {
