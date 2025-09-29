@@ -31,7 +31,18 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         super.onCreate(savedInstanceState)
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
-        setContent { MaterialTheme { Dashboard(availableSensors, sensorValues) } }
+       setContent {
+    MaterialTheme {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)   // dark background
+        ) {
+            Dashboard(availableSensors, sensorValues)
+        }
+    }
+}
+
 
         availableSensors = sensorManager.getSensorList(Sensor.TYPE_ALL)
             .map { "${it.name} (type ${it.type})" }.sorted()
