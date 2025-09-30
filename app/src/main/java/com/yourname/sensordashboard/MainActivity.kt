@@ -1,5 +1,8 @@
 package com.yourname.sensordashboard
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -43,6 +46,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private val sensorValues = mutableStateMapOf<String, String>()
     private var availableSensors by mutableStateOf(listOf<String>())
+    private var stepBaseline by mutableStateOf<Float?>(null)
+
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -121,11 +126,22 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
-    override fun onSensorChanged(event: SensorEvent) {
-        val name = labelFor(event.sensor.type)
-        val valueStr = formatTriple(event.values)
-        sensorValues[name] = valueStr
+override fun onSensorChanged(event: SensorEvent) {
+    val type = event.sensor.type
+    val name = labelFor(type)
+
+    if (type == Sensor.TYPE_STEP_COUNTER) {
+        val raw = event.values.firstOrNull() ?: 0f
+        if (stepBaseline == null) stepBaseline = raw
+        val sessionSteps = raw - (stepBaseline ?: raw)
+        sensorValues[name] = "[%.0f]".format(sessionSteps)
+        return
     }
+
+    val valueStr = formatTriple(event.values)
+    sensorValues[name] = valueStr
+}
+
 
     override fun onDestroy() {
         super.onDestroy()
@@ -153,11 +169,14 @@ private fun Dashboard(
         modifier = Modifier.fillMaxSize().padding(8.dp)
     ) {
         item {
-            Text(
-                "Sensor Dashboard",
-                fontWeight = FontWeight.Bold
-            )
-        }
+    Text(
+        "Sensor Dashboard",
+        fontWeight = FontWeight.Bold,
+        fontSize = 18.sp,
+        maxLines = 1
+    )
+    Spacer(Modifier.height(6.dp))
+}
 
         items(readingItems) { (name, value) ->
             SensorRow(name = name, value = value)
@@ -183,7 +202,7 @@ private fun Dashboard(
 private fun SensorRow(name: String, value: String) {
     val mag = parseMag(value)
 
-    // crude per-sensor scaling so the bar feels alive; tweak as desired
+    // per-sensor scaling so the bar feels responsive
     val scale = when {
         name.startsWith("Accelerometer") || name.startsWith("Linear Accel") || name.startsWith("Gravity") -> 20f
         name.startsWith("Gyroscope") -> 5f
@@ -197,28 +216,51 @@ private fun SensorRow(name: String, value: String) {
     val pct = (mag / scale).coerceIn(0f, 1f)
     val barColor = heatColor01(pct)
 
-    Column(Modifier.fillMaxWidth()) {
+    // Card-like container
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0x22, 0x22, 0x22))  // subtle charcoal
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        // Title
         Text(
             name,
             fontWeight = FontWeight.Bold,
+            fontSize = 16.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Spacer(Modifier.height(2.dp))
-        Text(value, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Spacer(Modifier.height(4.dp))
-        // background track
-        Box(Modifier.fillMaxWidth().height(4.dp).background(Color(0x33, 0xFF, 0xFF))) {
-            // heat bar
+        // Values
+        Text(
+            value,
+            fontSize = 12.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.height(6.dp))
+
+        // Track
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(Color(0x22, 0xFF, 0xFF))  // faint cyan track
+        ) {
+            // Fill
             Box(
                 Modifier
                     .fillMaxWidth(min(1f, pct))
-                    .height(4.dp)
+                    .height(6.dp)
                     .background(barColor)
             )
         }
     }
 }
+
 
 @Composable
 private fun Separator() {
