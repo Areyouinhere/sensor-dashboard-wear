@@ -1,332 +1,172 @@
 package com.yourname.sensordashboard
 
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.unit.sp
-import android.Manifest
+import android.app.Activity
 import android.content.Context
-import android.content.pm.PackageManager
+import android.graphics.*
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.ScalingLazyColumn
-import androidx.wear.compose.material.Text
-import androidx.wear.compose.material.items
-import kotlin.math.min
+import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import androidx.core.content.res.ResourcesCompat
 import kotlin.math.sqrt
+import kotlin.math.min
+import kotlin.math.max
 
-class MainActivity : ComponentActivity(), SensorEventListener {
+class MainActivity : Activity(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
-    private val sensorValues = mutableStateMapOf<String, String>()
-    private var availableSensors by mutableStateOf(listOf<String>())
-    private var stepBaseline by mutableStateOf<Float?>(null)
-
-
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { subscribeSensors() }
+    private lateinit var container: LinearLayout
+    private val sensorViews = mutableMapOf<Int, SensorVisualizer>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val scrollView = ScrollView(this).apply {
+            setBackgroundColor(Color.BLACK)
+            background = MicrogridBackground(this@MainActivity)
+        }
+
+        container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 16, 16, 16)
+        }
+
+        scrollView.addView(container)
+        setContentView(scrollView)
+
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val sensorList = sensorManager.getSensorList(Sensor.TYPE_ALL)
 
-        setContent {
-            MaterialTheme {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black)
-                ) {
-                    Dashboard(availableSensors, sensorValues)
-                }
-            }
-        }
-
-        availableSensors = sensorManager.getSensorList(Sensor.TYPE_ALL)
-            .map { "${it.name} (type ${it.type})" }
-            .sorted()
-
-        ensurePermissionsThenSubscribe()
-    }
-
-    private fun ensurePermissionsThenSubscribe() {
-        val needsBody = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.BODY_SENSORS
-        ) != PackageManager.PERMISSION_GRANTED
-        val needsAct = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACTIVITY_RECOGNITION
-        ) != PackageManager.PERMISSION_GRANTED
-
-        if (needsBody || needsAct) {
-            permissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.BODY_SENSORS,
-                    Manifest.permission.ACTIVITY_RECOGNITION
-                )
-            )
-        } else {
-            subscribeSensors()
+        for (sensor in sensorList) {
+            val vis = SensorVisualizer(this, sensor)
+            container.addView(vis)
+            sensorViews[sensor.type] = vis
+            sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_UI)
         }
     }
 
-    private fun subscribeSensors() {
-        sensorManager.unregisterListener(this)
-
-        fun reg(type: Int, delay: Int = SensorManager.SENSOR_DELAY_NORMAL) {
-            sensorManager.getDefaultSensor(type)?.let {
-                sensorManager.registerListener(this, it, delay)
-            }
-        }
-
-        // Motion / orientation
-        reg(Sensor.TYPE_ACCELEROMETER)
-        reg(Sensor.TYPE_GYROSCOPE)
-        reg(Sensor.TYPE_LINEAR_ACCELERATION)
-        reg(Sensor.TYPE_GRAVITY)
-        reg(Sensor.TYPE_ROTATION_VECTOR)
-
-        // Environment (may not all exist; safe no-ops if missing)
-        reg(Sensor.TYPE_MAGNETIC_FIELD)
-        reg(Sensor.TYPE_LIGHT)
-        reg(Sensor.TYPE_PRESSURE)
-        reg(Sensor.TYPE_RELATIVE_HUMIDITY)
-        reg(Sensor.TYPE_AMBIENT_TEMPERATURE)
-
-        // Activity / biometrics
-        reg(Sensor.TYPE_STEP_COUNTER)
-        reg(Sensor.TYPE_HEART_RATE)
+    override fun onSensorChanged(event: SensorEvent) {
+        sensorViews[event.sensor.type]?.updateValues(event.values)
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-
-override fun onSensorChanged(event: SensorEvent) {
-    val type = event.sensor.type
-    val name = labelFor(type)
-
-    if (type == Sensor.TYPE_STEP_COUNTER) {
-        val raw = event.values.firstOrNull() ?: 0f
-        if (stepBaseline == null) stepBaseline = raw
-        val sessionSteps = raw - (stepBaseline ?: raw)
-        sensorValues[name] = "[%.0f]".format(sessionSteps)
-        return
-    }
-
-    val valueStr = formatTriple(event.values)
-    sensorValues[name] = valueStr
 }
 
+// === CUSTOM VISUALIZER WIDGET ===
+class SensorVisualizer(context: Context, private val sensor: Sensor) : LinearLayout(context) {
+    private val title: TextView
+    private val value: TextView
+    private val bar: NeonBar
 
-    override fun onDestroy() {
-        super.onDestroy()
-        sensorManager.unregisterListener(this)
-    }
-}
+    init {
+        orientation = VERTICAL
+        setPadding(8, 16, 8, 16)
 
-/* ---------- UI ---------- */
-
-@Composable
-private fun Dashboard(
-    available: List<String>,
-    readings: Map<String, String>
-) {
-    val ordered = listOf(
-        "Accelerometer", "Linear Accel", "Gravity", "Gyroscope",
-        "Rotation Vector", "Magnetic", "Light", "Pressure",
-        "Humidity", "Ambient Temp", "Heart Rate", "Step Counter"
-    )
-    val readingItems = readings.entries.sortedWith(
-        compareBy({ ordered.indexOf(it.key).let { i -> if (i == -1) Int.MAX_VALUE else i } }, { it.key })
-    )
-
-    ScalingLazyColumn(
-        modifier = Modifier.fillMaxSize().padding(8.dp)
-    ) {
-        item {
-    Text(
-        "Sensor Dashboard",
-        fontWeight = FontWeight.Bold,
-        fontSize = 18.sp,
-        maxLines = 1
-    )
-    Spacer(Modifier.height(6.dp))
-}
-
-        items(readingItems) { (name, value) ->
-            SensorRow(name = name, value = value)
-            Spacer(Modifier.height(4.dp))
-            Separator()
-            Spacer(Modifier.height(4.dp))
+        title = TextView(context).apply {
+            text = sensor.name
+            setTextColor(Color.CYAN)
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
         }
 
-        item { Spacer(Modifier.height(10.dp)) }
-        item {
-            Text(
-                "Available Sensors (${available.size})",
-                fontWeight = FontWeight.SemiBold
-            )
+        value = TextView(context).apply {
+            setTextColor(Color.WHITE)
+            textSize = 12f
         }
-        items(available.take(30)) { line ->
-            Text(line, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+        bar = NeonBar(context, sensor)
+
+        addView(title)
+        addView(value)
+        addView(bar)
+    }
+
+    fun updateValues(values: FloatArray) {
+        val displayText = values.joinToString(", ") { "%.2f".format(it) }
+        value.text = "[$displayText]"
+        bar.setValues(values)
+    }
+}
+
+// === NEON VISUALIZER BAR ===
+class NeonBar(context: Context, private val sensor: Sensor) : View(context) {
+    private var currentValue = 0f
+    private var targetValue = 0f
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 10f
+        maskFilter = BlurMaskFilter(15f, BlurMaskFilter.Blur.NORMAL)
+        color = Color.CYAN
+    }
+
+    private val springInterpolator = AccelerateDecelerateInterpolator()
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+
+        // Smooth interpolation
+        currentValue += (targetValue - currentValue) * 0.15f
+
+        val width = width.toFloat()
+        val height = height.toFloat()
+
+        val barLength = width * currentValue
+
+        // Neon base bar
+        paint.color = Color.CYAN
+        canvas.drawRect(0f, height / 4, barLength, 3 * height / 4, paint)
+
+        // Glow effect
+        canvas.drawLine(0f, height / 2, barLength, height / 2, glowPaint)
+
+        invalidate()
+    }
+
+    fun setValues(values: FloatArray) {
+        val mag = sqrt(values.map { it * it }.sum())
+        val scaled = when (sensor.type) {
+            Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_LINEAR_ACCELERATION -> min(mag / 20f, 1f) // more sensitive
+            Sensor.TYPE_GYROSCOPE -> min(mag / 10f, 1f)
+            Sensor.TYPE_LIGHT -> min(values[0] / 1000f, 1f)
+            Sensor.TYPE_PRESSURE -> min((values[0] - 950f) / 100f, 1f) // normalize around atm
+            Sensor.TYPE_HEART_RATE -> min(values[0] / 200f, 1f) // bpm scale
+            Sensor.TYPE_STEP_COUNTER -> min(values[0] / 20000f, 1f) // filling bar up to ~20k
+            else -> min(mag / 50f, 1f)
         }
+        targetValue = scaled
     }
 }
 
-@Composable
-private fun SensorRow(name: String, value: String) {
-    val mag = parseMag(value)
-
-    // per-sensor scaling so the bar feels responsive
-    val scale = when {
-        name.startsWith("Accelerometer") || name.startsWith("Linear Accel") || name.startsWith("Gravity") -> 20f
-        name.startsWith("Gyroscope") -> 5f
-        name.startsWith("Magnetic") -> 120f
-        name.startsWith("Light") -> 1000f
-        name.startsWith("Pressure") -> 1100f
-        name.startsWith("Heart Rate") -> 200f
-        name.startsWith("Step Counter") -> 20000f
-        else -> 50f
+// === MICROGRID BACKGROUND WITH PARALLAX ===
+class MicrogridBackground(context: Context) : View(context) {
+    private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.DKGRAY
+        style = Paint.Style.STROKE
+        strokeWidth = 1f
     }
-    val pct = (mag / scale).coerceIn(0f, 1f)
-    val barColor = heatColor01(pct)
 
-    // Card-like container
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0x22, 0x22, 0x22))  // subtle charcoal
-            .padding(horizontal = 8.dp, vertical = 6.dp)
-    ) {
-        // Title
-        Text(
-            name,
-            fontWeight = FontWeight.Bold,
-            fontSize = 16.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Spacer(Modifier.height(2.dp))
-        // Values
-        Text(
-            value,
-            fontSize = 12.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-        Spacer(Modifier.height(6.dp))
+    override fun onDraw(canvas: Canvas) {
+        val width = width.toFloat()
+        val height = height.toFloat()
 
-        // Track
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(Color(0x22, 0xFF, 0xFF))  // faint cyan track
-        ) {
-            // Fill
-            Box(
-                Modifier
-                    .fillMaxWidth(min(1f, pct))
-                    .height(6.dp)
-                    .background(barColor)
-            )
+        val spacing = 20
+        for (x in 0 until width.toInt() step spacing) {
+            canvas.drawLine(x.toFloat(), 0f, x.toFloat(), height, gridPaint)
         }
-    }
-}
-
-
-@Composable
-private fun Separator() {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(1.dp)
-            .background(Color(0x33, 0xFF, 0xFF)) // subtle line (semi-transparent white)
-    )
-}
-
-/* ---------- helpers ---------- */
-
-private fun parseMag(values: String): Float {
-    // expects "... | |v|=12.34]"
-    return Regex("""\|v\|=([0-9.]+)""")
-        .find(values)?.groupValues?.get(1)?.toFloatOrNull() ?: 0f
-}
-
-/** 0.0 -> teal   … 0.5 -> yellow … 1.0 -> red  */
-private fun heatColor01(x: Float): Color {
-    val t = x.coerceIn(0f, 1f)
-    return if (t < 0.5f) {
-        // 0..0.5 : teal(0,180,180) -> yellow(255,215,0)
-        val k = t / 0.5f
-        Color(
-            (0 + (255 - 0) * k).toInt(),
-            (180 + (215 - 180) * k).toInt(),
-            (180 + (0 - 180) * k).toInt()
-        )
-    } else {
-        // 0.5..1.0 : yellow(255,215,0) -> red(255,64,64)
-        val k = (t - 0.5f) / 0.5f
-        Color(
-            255,
-            (215 + (64 - 215) * k).toInt(),
-            (0 + (64 - 0) * k).toInt()
-        )
-    }
-}
-
-private fun formatTriple(values: FloatArray): String {
-    return when (values.size) {
-        3 -> {
-            val (x, y, z) = values
-            val mag = sqrt(x * x + y * y + z * z)
-            "[x=%.2f, y=%.2f, z=%.2f | |v|=%.2f]".format(x, y, z, mag)
+        for (y in 0 until height.toInt() step spacing) {
+            canvas.drawLine(0f, y.toFloat(), width, y.toFloat(), gridPaint)
         }
-        2 -> "[%.2f, %.2f]".format(values[0], values[1])
-        1 -> "[%.2f]".format(values[0])
-        else -> values.joinToString(prefix = "[", postfix = "]") { "%.2f".format(it) }
-    }
-}
 
-private fun labelFor(type: Int): String = when (type) {
-    Sensor.TYPE_ACCELEROMETER       -> "Accelerometer"
-    Sensor.TYPE_GYROSCOPE           -> "Gyroscope"
-    Sensor.TYPE_LINEAR_ACCELERATION -> "Linear Accel"
-    Sensor.TYPE_GRAVITY             -> "Gravity"
-    Sensor.TYPE_ROTATION_VECTOR     -> "Rotation Vector"
-    Sensor.TYPE_MAGNETIC_FIELD      -> "Magnetic"
-    Sensor.TYPE_LIGHT               -> "Light"
-    Sensor.TYPE_PRESSURE            -> "Pressure"
-    Sensor.TYPE_RELATIVE_HUMIDITY   -> "Humidity"
-    Sensor.TYPE_AMBIENT_TEMPERATURE -> "Ambient Temp"
-    Sensor.TYPE_HEART_RATE          -> "Heart Rate"
-    Sensor.TYPE_STEP_COUNTER        -> "Step Counter"
-    else -> "Type $type"
+        invalidate()
+    }
 }
