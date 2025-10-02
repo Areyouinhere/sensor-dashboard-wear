@@ -1,6 +1,11 @@
 package com.yourname.sensordashboard
 
 import android.Manifest
+import androidx.compose.ui.Alignment
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.Sensor
@@ -193,9 +198,10 @@ private fun Dashboard(
         Spacer(Modifier.height(6.dp))
    
         if (readings.isEmpty()) {
-             WaitingHint()
-            Spacer(Modifier.height(8.dp))
+            WaitingPulseDots()
+            Spacer(Modifier.height(16.dp))
         }
+
         
         items.forEach { (name, values) ->
             SensorCard(name, values)
@@ -252,6 +258,7 @@ private fun SensorCard(name: String, values: FloatArray) {
 // Neon heat bar (tuned scaling + glow layers)
 @Composable
 private fun NeonHeatBar(name: String, values: FloatArray) {
+    // --- magnitude + per-sensor calibration ---
     val mag = when (name) {
         "Light" -> values.getOrNull(0)?.coerceAtLeast(0f) ?: 0f
         "Rotation Vector" -> {
@@ -283,6 +290,7 @@ private fun NeonHeatBar(name: String, values: FloatArray) {
     val anim = remember { Animatable(0f) }
     LaunchedEffect(target) { anim.animateTo(target, tween(220)) }
 
+    // neon palette
     val track = Color(0x33, 0xFF, 0xFF) // faint cyan
     val glow  = Color(0x66, 0x00, 0xEA) // violet glow
     val core  = Color(0xFF, 0xD7, 0x00) // warm core
@@ -294,17 +302,19 @@ private fun NeonHeatBar(name: String, values: FloatArray) {
             .clip(RoundedCornerShape(5.dp))
             .background(track)
     ) {
+        // glow layer
         Box(
             Modifier
                 .fillMaxWidth(anim.value)
                 .height(10.dp)
                 .background(glow)
         )
+        // core bar (centered vertically via padding instead of align)
         Box(
             Modifier
-                .align(Alignment.CenterStart)
                 .fillMaxWidth((anim.value * 0.98f).coerceAtLeast(0.02f))
                 .height(6.dp)
+                .padding(vertical = 2.dp)           // <-- replaces align()
                 .clip(RoundedCornerShape(3.dp))
                 .background(core)
         )
@@ -366,34 +376,36 @@ private fun BalancedDialBar(name: String, values: FloatArray) {
 
 
 @Composable
-fun WaitingHint() {
-    var alpha by remember { mutableStateOf(1f) }
+private fun WaitingPulseDots() {
+    var dots by remember { mutableStateOf(0) }
+    val alpha = remember { Animatable(1f) }
 
-    // Loop animation
+    // run fade + dot cycles concurrently
     LaunchedEffect(Unit) {
-        while (true) {
-            animate(
-                initialValue = 1f,
-                targetValue = 0.3f,
-                animationSpec = tween(durationMillis = 800),
-                block = { value, _ -> alpha = value }
-            )
-            animate(
-                initialValue = 0.3f,
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 800),
-                block = { value, _ -> alpha = value }
-            )
+        // fade loop
+        launch {
+            while (true) {
+                alpha.animateTo(0.3f, tween(800))
+                alpha.animateTo(1f, tween(800))
+            }
+        }
+        // dot loop
+        launch {
+            while (true) {
+                delay(500)
+                dots = (dots + 1) % 4
+            }
         }
     }
 
     Text(
-        text = "Listening for sensors…",
+        text = "Listening for sensors" + ".".repeat(dots),
         fontSize = 12.sp,
-        color = Color.Gray.copy(alpha = alpha),
+        color = Color.Gray.copy(alpha = alpha.value),
         modifier = Modifier.align(Alignment.CenterHorizontally)
     )
 }
+
 
 // Cumulative step bar (label shows session + total)
 @Composable
