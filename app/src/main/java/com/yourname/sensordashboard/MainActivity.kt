@@ -45,9 +45,13 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private var availableSensors by mutableStateOf(listOf<String>())
     private var stepBaseline by mutableStateOf<Float?>(null)
 
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { subscribeSensors() }
+private val permissionLauncher = registerForActivityResult(
+    ActivityResultContracts.RequestMultiplePermissions()
+) { _ ->
+    // Re-register including heart rate now that permissions may be granted
+    subscribeSensors(registerHeartRate = true)
+}
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,54 +76,61 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         ensurePermissionsThenSubscribe()
     }
 
-    private fun ensurePermissionsThenSubscribe() {
-        val needsBody = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.BODY_SENSORS
-        ) != PackageManager.PERMISSION_GRANTED
-        val needsAct = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACTIVITY_RECOGNITION
-        ) != PackageManager.PERMISSION_GRANTED
+private fun ensurePermissionsThenSubscribe() {
+    // Always start non-sensitive sensors right away
+    subscribeSensors(registerHeartRate = false)
 
-        if (needsBody || needsAct) {
-            permissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.BODY_SENSORS,
-                    Manifest.permission.ACTIVITY_RECOGNITION
-                )
+    // Then ask for BODY_SENSORS / ACTIVITY_RECOGNITION; add HR if granted
+    val needsBody = ContextCompat.checkSelfPermission(
+        this, Manifest.permission.BODY_SENSORS
+    ) != PackageManager.PERMISSION_GRANTED
+    val needsAct = ContextCompat.checkSelfPermission(
+        this, Manifest.permission.ACTIVITY_RECOGNITION
+    ) != PackageManager.PERMISSION_GRANTED
+
+    if (needsBody || needsAct) {
+        permissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.BODY_SENSORS,
+                Manifest.permission.ACTIVITY_RECOGNITION
             )
-        } else {
-            subscribeSensors()
+        )
+    } else {
+        // Permissions already granted — register HR now
+        subscribeSensors(registerHeartRate = true)
+    }
+}
+
+
+    private fun subscribeSensors(registerHeartRate: Boolean) {
+    sensorManager.unregisterListener(this)
+
+    fun reg(type: Int, delay: Int = SensorManager.SENSOR_DELAY_UI) {
+        sensorManager.getDefaultSensor(type)?.let { sensor ->
+            sensorManager.registerListener(this, sensor, delay)
         }
     }
 
-    private fun subscribeSensors() {
-        sensorManager.unregisterListener(this)
+    // Motion / orientation (no special permission)
+    reg(Sensor.TYPE_ACCELEROMETER)
+    reg(Sensor.TYPE_GYROSCOPE)
+    reg(Sensor.TYPE_LINEAR_ACCELERATION)
+    reg(Sensor.TYPE_GRAVITY)
+    reg(Sensor.TYPE_ROTATION_VECTOR)
 
-        fun reg(type: Int, delay: Int = SensorManager.SENSOR_DELAY_UI) {
-            sensorManager.getDefaultSensor(type)?.let { sensor ->
-                sensorManager.registerListener(this, sensor, delay)
-            }
-        }
+    // Environment (no special permission)
+    reg(Sensor.TYPE_MAGNETIC_FIELD)
+    reg(Sensor.TYPE_LIGHT)
+    reg(Sensor.TYPE_PRESSURE)
+    reg(Sensor.TYPE_RELATIVE_HUMIDITY)
+    reg(Sensor.TYPE_AMBIENT_TEMPERATURE)
 
-        // Motion / orientation
-        reg(Sensor.TYPE_ACCELEROMETER)
-        reg(Sensor.TYPE_GYROSCOPE)
-        reg(Sensor.TYPE_LINEAR_ACCELERATION)
-        reg(Sensor.TYPE_GRAVITY)
-        reg(Sensor.TYPE_ROTATION_VECTOR)
+    // Activity (no special permission)
+    reg(Sensor.TYPE_STEP_COUNTER)
 
-        // Environment
-        reg(Sensor.TYPE_MAGNETIC_FIELD)
-        reg(Sensor.TYPE_LIGHT)
-        reg(Sensor.TYPE_PRESSURE)
-        reg(Sensor.TYPE_RELATIVE_HUMIDITY)
-        reg(Sensor.TYPE_AMBIENT_TEMPERATURE)
-
-        // Activity / biometrics
-        reg(Sensor.TYPE_STEP_COUNTER)
-        reg(Sensor.TYPE_HEART_RATE)
-        // Optional (per-step pulses): reg(Sensor.TYPE_STEP_DETECTOR)
-    }
+    // Biometrics (needs BODY_SENSORS)
+    if (registerHeartRate) reg(Sensor.TYPE_HEART_RATE)
+}
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
@@ -180,7 +191,12 @@ private fun Dashboard(
     ) {
         Text("Sensor Dashboard", fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Spacer(Modifier.height(6.dp))
-
+   
+        if (readings.isEmpty()) {
+             WaitingHint()
+            Spacer(Modifier.height(8.dp))
+        }
+        
         items.forEach { (name, values) ->
             SensorCard(name, values)
             Spacer(Modifier.height(8.dp))
@@ -346,6 +362,37 @@ private fun BalancedDialBar(name: String, values: FloatArray) {
             )
         }
     }
+}
+
+
+@Composable
+fun WaitingHint() {
+    var alpha by remember { mutableStateOf(1f) }
+
+    // Loop animation
+    LaunchedEffect(Unit) {
+        while (true) {
+            animate(
+                initialValue = 1f,
+                targetValue = 0.3f,
+                animationSpec = tween(durationMillis = 800),
+                block = { value, _ -> alpha = value }
+            )
+            animate(
+                initialValue = 0.3f,
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 800),
+                block = { value, _ -> alpha = value }
+            )
+        }
+    }
+
+    Text(
+        text = "Listening for sensors…",
+        fontSize = 12.sp,
+        color = Color.Gray.copy(alpha = alpha),
+        modifier = Modifier.align(Alignment.CenterHorizontally)
+    )
 }
 
 // Cumulative step bar (label shows session + total)
