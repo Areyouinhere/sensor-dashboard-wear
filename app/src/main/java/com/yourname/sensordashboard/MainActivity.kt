@@ -427,18 +427,18 @@ private fun SensorCard(name: String, values: FloatArray) {
         }
         "Gravity" -> {
             val dev = magnitude(values) - 9.81f // show deviation so tilt/motion appears
-            CenteredZeroBar(dev, visualRange = 3f)
+            CenteredZeroBar(dev, visualRange = 2f)
         }
         "Linear Accel" -> {
             val mag = magnitude(values)
-            CenteredZeroBar(mag, visualRange = 6f)
+            CenteredZeroBar(mag, visualRange = 10f)
         }
         "Rotation Vector" -> {
             val ori = orientationDegState.value
             RotationPseudo3D(
                 x = ori.getOrNull(2) ?: 0f,  // roll
                 y = ori.getOrNull(1) ?: 0f,  // pitch
-                z = (ori.getOrNull(0) ?: 0f) / 180f // azimuth factor
+                z = (ori.getOrNull(0) ?: 0f) / 360f // azimuth factor
             )
         }
         "Magnetic" -> {
@@ -512,7 +512,14 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        Text("Coherence", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text(
+    "Coherence",
+    fontWeight = FontWeight.Bold,
+    fontSize = 18.sp,
+    modifier = Modifier
+        .fillMaxWidth()
+        .wrapContentWidth(Alignment.CenterHorizontally)
+)
         Spacer(Modifier.height(8.dp))
 
         // The glyph
