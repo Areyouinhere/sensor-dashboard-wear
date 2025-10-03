@@ -36,10 +36,18 @@ import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.abs
-import kotlin.math.min
-import kotlin.math.sin
-import kotlin.math.sqrt
+import kotlin.math.*
+
+/* ================= GLOBAL SIGNAL BUS / SCALERS ================= */
+
+// Orientation shared state (azimuth, pitch, roll) in degrees
+private val orientationDegState = mutableStateOf(floatArrayOf(0f, 0f, 0f))
+
+// Adaptive scalers so bars feel responsive across environments
+private val lightScale = AutoScaler(decay = 0.995f, floor = 1f, ceil = 20000f) // lux
+private val magScale   = AutoScaler(decay = 0.995f, floor = 5f,  ceil = 150f)   // µT
+
+/* ================= ACTIVITY ================= */
 
 class MainActivity : ComponentActivity(), SensorEventListener {
 
@@ -47,6 +55,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private val readings = mutableStateMapOf<String, FloatArray>()
     private var availableSensors by mutableStateOf(listOf<String>())
     private var stepBaseline by mutableStateOf<Float?>(null)
+
+    // Last raw vectors for fusion
+    private var lastAccel: FloatArray? = null
+    private var lastMag:   FloatArray? = null
+    private var lastRotVec: FloatArray? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -78,6 +91,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     }
 
     private fun ensurePermissionsThenSubscribe() {
+        // Start non-sensitive sensors immediately
         subscribeSensors(registerHeartRate = false)
 
         val needsBody = ContextCompat.checkSelfPermission(
@@ -138,29 +152,63 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             return
         }
 
-        // Feed history buffers for visuals that require time series
         when (event.sensor.type) {
+            Sensor.TYPE_ACCELEROMETER -> {
+                lastAccel = event.values.copyOf()
+                SensorHistory.pushAccel(magnitude(event.values))
+            }
+            Sensor.TYPE_MAGNETIC_FIELD -> {
+                lastMag = event.values.copyOf()
+            }
             Sensor.TYPE_GYROSCOPE -> {
                 val x = event.values.getOrNull(0) ?: 0f
                 val y = event.values.getOrNull(1) ?: 0f
                 val z = event.values.getOrNull(2) ?: 0f
                 SensorHistory.pushGyro(x, y, z)
             }
-            Sensor.TYPE_ACCELEROMETER -> {
-                SensorHistory.pushAccel(magnitude(event.values))
-            }
             Sensor.TYPE_GRAVITY -> {
+                lastAccel = event.values.copyOf() // treat as gravity when present
                 SensorHistory.pushGrav(magnitude(event.values))
             }
             Sensor.TYPE_ROTATION_VECTOR -> {
-                val x = event.values.getOrNull(0) ?: 0f
-                val y = event.values.getOrNull(1) ?: 0f
-                val z = event.values.getOrNull(2) ?: 0f
-                SensorHistory.pushRot(sqrt(x*x + y*y + z*z))
+                lastRotVec = event.values.copyOf()
             }
+            // Light/HR handled in UI, still stored below
         }
 
+        // Update orientation if possible
+        computeOrientationDegrees()?.let { orientationDegState.value = it }
+
         readings[key] = event.values.copyOf()
+    }
+
+    private fun computeOrientationDegrees(): FloatArray? {
+        val rMat = FloatArray(9)
+        val iMat = FloatArray(9)
+        val ori  = FloatArray(3)
+
+        return when {
+            lastRotVec != null -> {
+                SensorManager.getRotationMatrixFromVector(rMat, lastRotVec)
+                SensorManager.getOrientation(rMat, ori)
+                floatArrayOf(
+                    (ori[0] * 180f / Math.PI.toFloat()),
+                    (ori[1] * 180f / Math.PI.toFloat()),
+                    (ori[2] * 180f / Math.PI.toFloat())
+                )
+            }
+            lastAccel != null && lastMag != null -> {
+                if (SensorManager.getRotationMatrix(rMat, iMat, lastAccel, lastMag)) {
+                    SensorManager.getOrientation(rMat, ori)
+                    floatArrayOf(
+                        (ori[0] * 180f / Math.PI.toFloat()),
+                        (ori[1] * 180f / Math.PI.toFloat()),
+                        (ori[2] * 180f / Math.PI.toFloat())
+                    )
+                } else null
+            }
+            else -> null
+        }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
@@ -175,7 +223,7 @@ private object SensorHistory {
     val gyroZ = mutableStateListOf<Float>()
     val accel = mutableStateListOf<Float>()
     val grav  = mutableStateListOf<Float>()
-    val rot   = mutableStateListOf<Float>()
+    val rot   = mutableStateListOf<Float>() // reserved for future sparklines
 
     private fun push(list: MutableList<Float>, v: Float, max: Int = 120) {
         if (list.size >= max) list.removeAt(0)
@@ -186,6 +234,27 @@ private object SensorHistory {
     fun pushAccel(m: Float) = push(accel, m)
     fun pushGrav(m: Float)  = push(grav, m)
     fun pushRot(m: Float)   = push(rot, m)
+}
+
+/* ================= ADAPTIVE SCALER ================= */
+
+private class AutoScaler(
+    private val decay: Float = 0.995f,
+    private val floor: Float = 0.1f,
+    private val ceil: Float = 100f
+) {
+    private var hi = floor
+    private var lo = floor
+
+    fun norm(value: Float): Float {
+        if (!value.isFinite()) return 0f
+        if (value > hi) hi = min(value, ceil)
+        if (value < lo) lo = max(value, floor)
+        hi = max(hi * decay, value)
+        lo = min(lo / decay, value)
+        val span = (hi - lo).coerceAtLeast(1e-3f)
+        return ((value - lo) / span).coerceIn(0f, 1f)
+    }
 }
 
 /* ================= PAGER ROOT ================= */
@@ -210,12 +279,12 @@ private fun PagerRoot(
             }
         }
 
-        // simple indicator
+        // Simple page dots
         Row(
             Modifier
                 .fillMaxWidth()
                 .padding(bottom = 6.dp),
-            horizontalArrangement = Arrangement.Center
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center
         ) {
             Dot(active = pagerState.currentPage == 0)
             Spacer(Modifier.width(6.dp))
@@ -246,7 +315,6 @@ private fun Dashboard(
         "Humidity", "Ambient Temp", "Heart Rate", "Step Counter"
     )
 
-    // Ensure recompute when map content changes
     val items by remember {
         derivedStateOf {
             readings.entries.sortedWith(
@@ -282,22 +350,61 @@ private fun Dashboard(
 /* ================= SENSOR CARD ================= */
 
 @Composable
+private fun LiveValuesLine(values: FloatArray) {
+    val txt = values.joinToString(limit = 3, truncated = "…") { v -> "%.2f".format(v) }
+    Text(txt, fontSize = 10.sp, color = Color(0xAA, 0xFF, 0xFF))
+}
+
+@Composable
 private fun SensorCard(name: String, values: FloatArray) {
     Text(name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    LiveValuesLine(values)
 
     when (name) {
         "Gyroscope" -> {
             GyroWaveform(SensorHistory.gyroX, SensorHistory.gyroY, SensorHistory.gyroZ)
         }
-        "Gravity", "Linear Accel" -> {
-            val centered = magnitude(values) - if (name == "Gravity") 9.81f else 0f
-            CenteredZeroBar(centered, visualRange = 12f)
+        "Gravity" -> {
+            // show deviation from 9.81 so it moves with posture/tilt
+            val dev = magnitude(values) - 9.81f
+            CenteredZeroBar(dev, visualRange = 3f)
+        }
+        "Linear Accel" -> {
+            // zero-centered impulse; magnitude around 0..6 feels good
+            val mag = magnitude(values)
+            CenteredZeroBar(mag, visualRange = 6f)
         }
         "Rotation Vector" -> {
-            val x = values.getOrNull(0) ?: 0f
-            val y = values.getOrNull(1) ?: 0f
-            val z = values.getOrNull(2) ?: 0f
-            RotationPseudo3D(x, y, z)
+            // Drive pseudo-3D from fused orientation
+            val ori = orientationDegState.value
+            val pitch = ori.getOrNull(1) ?: 0f
+            val roll  = ori.getOrNull(2) ?: 0f
+            val az    = ori.getOrNull(0) ?: 0f
+            RotationPseudo3D(
+                x = roll,                    // visually pleasing mapping
+                y = pitch,
+                z = (az / 180f)              // scale azimuth for center dot intensity
+            )
+        }
+        "Magnetic" -> {
+            // Heading + field strength
+            val hx = values.getOrNull(0) ?: 0f
+            val hy = values.getOrNull(1) ?: 0f
+            val hz = values.getOrNull(2) ?: 0f
+            val mag = sqrt(hx*hx + hy*hy + hz*hz)
+            val heading = orientationDegState.value.getOrNull(0) ?: 0f
+            MagneticDial(heading = heading, strengthNorm = magScale.norm(mag))
+        }
+        "Light" -> {
+            // Log-ish + adaptive so it moves indoors and outdoors
+            val lux = values.getOrNull(0) ?: 0f
+            val logNorm = (ln(1f + lux) / ln(1f + 20000f)).coerceIn(0f, 1f)
+            val adaptive = lightScale.norm(logNorm * 20000f)
+            NeonHeatBarNormalized(adaptive)
+        }
+        "Heart Rate" -> {
+            val bpm = values.getOrNull(0) ?: 0f
+            HeartPulse(bpm = bpm.coerceIn(30f, 220f))
         }
         else -> {
             NeonHeatBar(name, values)
@@ -311,20 +418,29 @@ private fun SensorCard(name: String, values: FloatArray) {
 
 @Composable
 private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
+    // Pull raw
     val accel = readings["Accelerometer"] ?: floatArrayOf(0f, 0f, 0f)
     val gyro  = readings["Gyroscope"]     ?: floatArrayOf(0f, 0f, 0f)
     val hr    = readings["Heart Rate"]?.getOrNull(0) ?: 0f
-    val press = readings["Pressure"]?.getOrNull(0) ?: 1000f
+    val press = readings["Pressure"]?.getOrNull(0)     ?: 1000f
 
-    val nAccel = (magnitude(accel) / 12f).coerceIn(0f, 1f)
-    val nGyro  = (magnitude(gyro)  / 6f ).coerceIn(0f, 1f)
-    val nHR    = (hr / 150f).coerceIn(0f, 1f)
-    val nP     = ((press - 980f) / 60f).coerceIn(0f, 1f)
+    // Normalize with perceptual ranges
+    val nAccel = (magnitude(accel) / 15f).coerceIn(0f, 1f)  // up to ~15 m/s²
+    val nGyro  = (magnitude(gyro)  / 8f ).coerceIn(0f, 1f)  // up to ~8 rad/s
+    val nHR    = ((hr - 50f) / 100f).coerceIn(0f, 1f)       // 50–150 bpm
+    val nP     = ((press - 980f) / 80f).coerceIn(0f, 1f)    // 980–1060 hPa
 
-    val motionStability = 1f - nGyro
-    val accelPresence   = nAccel
-    val hrPresence      = 1f - abs(nHR - 0.5f) * 2f
-    val envBalance      = 1f - abs(nP - 0.5f) * 2f
+    // Smooth (EMA)
+    val ema = remember { mutableStateOf(floatArrayOf(nAccel, nGyro, nHR, nP)) }
+    val alpha = 0.12f
+    val target = floatArrayOf(nAccel, nGyro, nHR, nP)
+    val smoothed = FloatArray(4) { i -> ema.value[i] + alpha * (target[i] - ema.value[i]) }
+    ema.value = smoothed
+
+    val accelPresence   = smoothed[0]
+    val motionStability = 1f - smoothed[1]
+    val hrPresence      = 1f - abs(smoothed[2] - 0.5f) * 2f
+    val envBalance      = 1f - abs(smoothed[3] - 0.5f) * 2f
 
     Column(
         Modifier
@@ -349,7 +465,6 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                 val topLeft = Offset(cx - r, cy - r)
                 val size = Size(d, d)
 
-                // 360° track
                 drawArc(
                     color = track,
                     startAngle = -90f,
@@ -359,7 +474,6 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                     size = size,
                     style = Stroke(width = 8f, cap = StrokeCap.Round)
                 )
-                // glow sweep
                 drawArc(
                     color = glow,
                     startAngle = -90f,
@@ -369,7 +483,6 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                     size = size,
                     style = Stroke(width = 10f, cap = StrokeCap.Round)
                 )
-                // core sweep
                 drawArc(
                     color = core,
                     startAngle = -90f,
@@ -381,7 +494,6 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                 )
             }
 
-            // Pass all required colors (track, glow, core)
             ring(
                 baseR + gap * 0f, hrPresence,
                 track = Color(0x22, 0xFF, 0xFF),
@@ -461,11 +573,14 @@ private fun NeonHeatBar(name: String, values: FloatArray) {
         "Step Counter"  -> 20000f
         else -> 50f
     }
-    val target = (mag / scale).coerceIn(0f, 1f)
-    val anim = remember { Animatable(0f) }
-    LaunchedEffect(target) { anim.animateTo(target, tween(220)) }
+    NeonHeatBarNormalized((mag / scale).coerceIn(0f, 1f))
+}
 
-    // neon three-layer bar
+@Composable
+private fun NeonHeatBarNormalized(norm: Float) {
+    val anim = remember { Animatable(0f) }
+    LaunchedEffect(norm) { anim.animateTo(norm.coerceIn(0f, 1f), tween(220)) }
+
     val track = Color(0x33, 0xFF, 0xFF)
     val glow  = Color(0x66, 0x00, 0xEA)
     val core  = Color(0xFF, 0xD7, 0x00)
@@ -546,7 +661,6 @@ private fun GyroWaveform(
             pass(alpha = 1.00f, stroke = 2f)
         }
 
-        // axis colors
         val gold   = Color(0xFF, 0xD7, 0x00) // X
         val violet = Color(0x66, 0x00, 0xEA) // Y
         val cyan   = Color(0x00, 0xD0, 0xFF) // Z
@@ -599,9 +713,9 @@ private fun CenteredZeroBar(value: Float, visualRange: Float) {
 
 @Composable
 private fun RotationPseudo3D(x: Float, y: Float, z: Float) {
-    // Tilt the tile by roll/pitch approximations derived from rotation vector
-    val pitchDeg = (y * 20f).coerceIn(-30f, 30f)
-    val rollDeg  = (x * 20f).coerceIn(-30f, 30f)
+    // x ~ roll, y ~ pitch, z ~ normalized azimuth factor
+    val pitchDeg = y.coerceIn(-30f, 30f)
+    val rollDeg  = x.coerceIn(-30f, 30f)
     val tiltX = sin(rollDeg * (Math.PI / 180f).toFloat())
     val tiltY = sin(pitchDeg * (Math.PI / 180f).toFloat())
 
@@ -614,7 +728,6 @@ private fun RotationPseudo3D(x: Float, y: Float, z: Float) {
         val rh = h * 0.5f
 
         val base = Color(0x22, 0xFF, 0xFF)
-        val glow = Color(0x66, 0x00, 0xEA)
         val core = Color(0xFF, 0xD7, 0x00)
 
         val dx = tiltX * 10f
@@ -630,7 +743,7 @@ private fun RotationPseudo3D(x: Float, y: Float, z: Float) {
         val p3 = Offset(right + dx, bottom - dy)
         val p4 = Offset(left  + dx, bottom + dy)
 
-        // outer glow wireframe then core wireframe
+        // glow wireframe then core wireframe
         listOf(4f to base, 2f to core).forEach { (stroke, col) ->
             drawLine(col, p1, p2, strokeWidth = stroke)
             drawLine(col, p2, p3, strokeWidth = stroke)
@@ -639,13 +752,70 @@ private fun RotationPseudo3D(x: Float, y: Float, z: Float) {
         }
 
         // cross axes
-        drawLine(glow, Offset(cx - rw/2f, cy), Offset(cx + rw/2f, cy), 2f)
-        drawLine(glow, Offset(cx, cy - rh/2f), Offset(cx, cy + rh/2f), 2f)
+        drawLine(base, Offset(cx - rw/2f, cy), Offset(cx + rw/2f, cy), 2f)
+        drawLine(base, Offset(cx, cy - rh/2f), Offset(cx, cy + rh/2f), 2f)
 
-        // center dot intensity from z
-        val intensity = (abs(z).coerceIn(0f, 1.5f) / 1.5f)
+        // center dot intensity from z factor
+        val intensity = abs(z).coerceIn(0f, 1f)
         val dotR = 3f + 5f * intensity
         drawCircle(core, radius = dotR, center = Offset(cx, cy))
+    }
+}
+
+@Composable
+private fun MagneticDial(heading: Float, strengthNorm: Float) {
+    Canvas(Modifier.fillMaxWidth().height(72.dp)) {
+        val w = size.width; val h = size.height
+        val cx = w/2f; val cy = h/2f
+        val r = min(w, h) * 0.42f
+
+        // ring
+        drawArc(
+            color = Color(0x22, 0xFF, 0xFF),
+            startAngle = 0f,
+            sweepAngle = 360f,
+            useCenter = false,
+            topLeft = Offset(cx - r, cy - r),
+            size = Size(r*2, r*2),
+            style = Stroke(width = 6f, cap = StrokeCap.Round)
+        )
+
+        // needle
+        val ang = (-heading + 90f) * (PI/180f).toFloat()
+        val nx = cx + cos(ang) * r
+        val ny = cy - sin(ang) * r
+        drawLine(Color(0xFF,0xD7,0x00), start = Offset(cx, cy), end = Offset(nx, ny), strokeWidth = 4f)
+
+        // inner strength ring
+        val ir = r * (0.3f + 0.6f * strengthNorm.coerceIn(0f,1f))
+        drawArc(
+            color = Color(0x66, 0x00, 0xEA),
+            startAngle = 0f,
+            sweepAngle = 360f,
+            useCenter = false,
+            topLeft = Offset(cx - ir, cy - ir),
+            size = Size(ir*2, ir*2),
+            style = Stroke(width = 4f, cap = StrokeCap.Round)
+        )
+    }
+}
+
+@Composable
+private fun HeartPulse(bpm: Float) {
+    val beatMs = (60000f / bpm.coerceAtLeast(30f)).toLong()
+    val scale = remember { Animatable(0.8f) }
+    LaunchedEffect(bpm) {
+        while (true) {
+            scale.animateTo(1.1f, tween((beatMs*0.35).toInt()))
+            scale.animateTo(0.8f, tween((beatMs*0.65).toInt()))
+        }
+    }
+    Canvas(Modifier.fillMaxWidth().height(38.dp)) {
+        val w = size.width; val h = size.height
+        val cx = w/2f; val cy = h/2f
+        val r  = min(w, h) * 0.18f * scale.value
+        drawCircle(Color(0x66,0x00,0xEA), radius = r*1.4f, center = Offset(cx, cy))
+        drawCircle(Color(0xFF,0xD7,0x00), radius = r,       center = Offset(cx, cy))
     }
 }
 
@@ -679,11 +849,7 @@ private fun MicrogridParallax() {
 
 /* ================= UTILITIES ================= */
 
-private fun magnitude(values: FloatArray): Float {
-    var s = 0f
-    for (v in values) s += v * v
-    return sqrt(s)
-}
+private fun magnitude(values: FloatArray): Float = sqrt(values.fold(0f){ s, v -> s + v*v })
 
 private fun labelFor(type: Int): String = when (type) {
     Sensor.TYPE_ACCELEROMETER       -> "Accelerometer"
