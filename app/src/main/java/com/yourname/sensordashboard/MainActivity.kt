@@ -292,12 +292,45 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
             val cx = size.width/2f; val cy = size.height/2f
             val baseR = min(size.width, size.height) * 0.28f; val gap = 14f
 
-            fun ring(r: Float, pct: Float, col: Color) {
-                val d = r*2f; val rect = androidx.compose.ui.geometry.Rect(cx-r, cy-r, cx+r, cy+r)
-                drawArc(col.copy(alpha=0.2f), -90f, 360f, false, rect.topLeft, Size(d,d), Stroke(8f))
-                drawArc(col.copy(alpha=0.6f), -90f, 360f*pct, false, rect.topLeft, Size(d,d), Stroke(10f))
-                drawArc(col, -90f, (360f*pct).coerceAtLeast(6f), false, rect.topLeft, Size(d,d), Stroke(5f))
-            }
+            fun ring(r: Float, pct: Float, track: Color, glow: Color, core: Color) {
+    val d = r * 2f
+    val topLeft = Offset(cx - r, cy - r)
+    val size = Size(d, d)
+
+    // 360° track
+    drawArc(
+        color = track,
+        startAngle = -90f,
+        sweepAngle = 360f,
+        useCenter = false,
+        topLeft = topLeft,
+        size = size,
+        style = Stroke(width = 8f, cap = StrokeCap.Round)
+    )
+
+    // glow sweep
+    drawArc(
+        color = glow,
+        startAngle = -90f,
+        sweepAngle = 360f * pct.coerceIn(0f, 1f),
+        useCenter = false,
+        topLeft = topLeft,
+        size = size,
+        style = Stroke(width = 10f, cap = StrokeCap.Round)
+    )
+
+    // core sweep
+    drawArc(
+        color = core,
+        startAngle = -90f,
+        sweepAngle = (360f * pct).coerceAtLeast(6f),
+        useCenter = false,
+        topLeft = topLeft,
+        size = size,
+        style = Stroke(width = 5f, cap = StrokeCap.Round)
+    )
+}
+
 
             ring(baseR+0*gap, hrPresence, Color.Yellow)
             ring(baseR+1*gap, motionStability, Color.Cyan)
@@ -311,7 +344,70 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
 
 @Composable private fun WaitingPulseDots() { /* same as before */ }
 @Composable private fun NeonHeatBar(name: String, values: FloatArray) { /* same as before */ }
-@Composable private fun GyroWaveform(hx: List<Float>, hy: List<Float>, hz: List<Float>, range: Float=6f) { /* as given */ }
+@Composable private fun GyroWaveform(@Composable
+private fun GyroWaveform(
+    hx: List<Float>,
+    hy: List<Float>,
+    hz: List<Float>,
+    range: Float = 6f // rad/s visual range
+) {
+    Canvas(Modifier.fillMaxWidth().height(64.dp)) {
+        val w = size.width
+        val h = size.height
+        val mid = h / 2f
+
+        fun mapY(v: Float): Float {
+            val clamped = v.coerceIn(-range, range)
+            return mid - (clamped / range) * (h * 0.45f)
+        }
+
+        // subtle grid
+        val grid = Color(0x22, 0xFF, 0xFF)
+        drawLine(grid, start = Offset(0f, mid), end = Offset(w, mid), strokeWidth = 1f)
+        val columns = 8
+        val stepX = w / columns
+        for (i in 1 until columns) {
+            val x = stepX * i
+            drawLine(grid.copy(alpha = 0.15f), Offset(x, 0f), Offset(x, h), 1f)
+        }
+
+        fun drawSeries(series: List<Float>, core: Color) {
+            if (series.size < 2) return
+            val step = w / (series.size - 1).coerceAtLeast(1)
+
+            // helper to draw one pass
+            fun pass(alpha: Float, stroke: Float) {
+                var prev = Offset(0f, mapY(series[0]))
+                for (i in 1 until series.size) {
+                    val x = step * i
+                    val y = mapY(series[i])
+                    drawLine(
+                        color = core.copy(alpha = alpha),
+                        start = prev,
+                        end = Offset(x, y),
+                        strokeWidth = stroke
+                    )
+                    prev = Offset(x, y)
+                }
+            }
+
+            // glow back → mid → core
+            pass(alpha = 0.22f, stroke = 7f)
+            pass(alpha = 0.35f, stroke = 4f)
+            pass(alpha = 1.00f, stroke = 2f)
+        }
+
+        // axis colors
+        val gold  = Color(0xFF, 0xD7, 0x00) // X
+        val violet= Color(0x66, 0x00, 0xEA) // Y
+        val cyan  = Color(0x00, 0xD0, 0xFF) // Z
+
+        drawSeries(hx, gold)
+        drawSeries(hy, violet)
+        drawSeries(hz, cyan)
+    }
+}
+) { /* as given */ }
 @Composable private fun CenteredZeroBar(value: Float, visualRange: Float) { /* as given */ }
 @Composable private fun RotationPseudo3D(x: Float,y: Float,z: Float) { /* as given */ }
 @Composable private fun MicrogridParallax() { /* as before */ }
