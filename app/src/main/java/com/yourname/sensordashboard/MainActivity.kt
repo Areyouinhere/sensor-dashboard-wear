@@ -499,10 +499,13 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
 
     // Map to rings (expressed as presence/balance in [0..1])
     val hrvPresence      = smoothed[4]                         // variability capacity
-    val hrPresence       = 1f - abs(smoothed[2] - 0.5f) * 2f   // closeness to midband HR
+    val hrPresence       = 1f - kotlin.math.abs(smoothed[2] - 0.5f) * 2f   // closeness to midband HR
     val motionStability  = 1f - smoothed[1]                    // calmer when less rotation
     val accelPresence    = smoothed[0]                         // movement amplitude
-    val envBalance       = 1f - abs(smoothed[3] - 0.5f) * 2f   // barometric centering
+    val envBalance       = 1f - kotlin.math.abs(smoothed[3] - 0.5f) * 2f   // barometric centering
+
+    // Local UI state (must be inside a Composable)
+    var showDetail by remember { mutableStateOf(false) }
 
     Column(
         Modifier
@@ -512,6 +515,7 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
         Text("Coherence", fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Spacer(Modifier.height(8.dp))
 
+        // The glyph
         Canvas(
             Modifier
                 .fillMaxWidth()
@@ -526,7 +530,7 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                 val r = baseR + gap * idx
                 val d = r * 2f
                 val topLeft = Offset(cx - r, cy - r)
-                val size = Size(d, d)
+                val sz = Size(d, d)
 
                 drawArc(
                     color = Color(0x22, 0xFF, 0xFF),
@@ -534,7 +538,7 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                     sweepAngle = 360f,
                     useCenter = false,
                     topLeft = topLeft,
-                    size = size,
+                    size = sz,
                     style = Stroke(width = 8f, cap = StrokeCap.Round)
                 )
                 drawArc(
@@ -543,7 +547,7 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                     sweepAngle = 360f * pct.coerceIn(0f, 1f),
                     useCenter = false,
                     topLeft = topLeft,
-                    size = size,
+                    size = sz,
                     style = Stroke(width = 10f, cap = StrokeCap.Round)
                 )
                 drawArc(
@@ -552,7 +556,7 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                     sweepAngle = (360f * pct).coerceAtLeast(6f),
                     useCenter = false,
                     topLeft = topLeft,
-                    size = size,
+                    size = sz,
                     style = Stroke(width = 5f, cap = StrokeCap.Round)
                 )
             }
@@ -563,12 +567,10 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
             ring(2, motionStability, Color(0x44, 0xD0, 0xFF), Color(0xAA, 0xFF, 0xFF)) // Gyro stability
             ring(3, accelPresence,   Color(0x55, 0xFF, 0xD7), Color(0xFF, 0xE6, 0x88)) // Accel magnitude
             ring(4, envBalance,      Color(0x44, 0xFF, 0x99), Color(0xDD, 0xFF, 0x99)) // Pressure balance
+        }
 
-                    // --- Compact metric readouts under the glyph ---
+        // --- Compact metric readouts under the glyph ---
         Spacer(Modifier.height(8.dp))
-
-        // Tap the glyph area to toggle extra detail
-        var showDetail by remember { mutableStateOf(false) }
 
         // Quick single-line summary
         Text(
@@ -587,7 +589,7 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
         Text(
             text = buildString {
                 append("Accel "); append(fmt1(nAccel)); append(" • ")
-                append("Env ");   append(fmtPct(1f - abs(nP - 0.5f) * 2f))
+                append("Env ");   append(fmtPct(1f - kotlin.math.abs(nP - 0.5f) * 2f))
             },
             fontSize = 11.sp,
             color = Color(0x99, 0xFF, 0xFF)
@@ -609,7 +611,6 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
         if (showDetail) {
             Spacer(Modifier.height(6.dp))
             Text(
-                // Short, synchronous, signal-coherent description
                 text =
                     "The rings show a live coherence field:\n" +
                     "• Inner (HRV): variability capacity (higher fill = more adaptability).\n" +
@@ -624,8 +625,6 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                 color = Color(0xAA, 0xFF, 0xFF),
                 lineHeight = 14.sp
             )
-        }
-
         }
     }
 }
