@@ -1,5 +1,6 @@
 package com.yourname.sensordashboard
 
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.clickable
 import android.content.Context
 import android.hardware.Sensor
