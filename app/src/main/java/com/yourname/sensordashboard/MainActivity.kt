@@ -1,5 +1,8 @@
 package com.yourname.sensordashboard
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.asPaddingValues
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -64,6 +67,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color.Black)
+                        .padding(WindowInsets.safeDrawing.asPaddingValues())
                 ) {
                     MicrogridParallax()   // subtle rolling grid in the back
                     PagerRoot(
@@ -191,7 +195,7 @@ private fun PagerRoot(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(bottom = 6.dp),
+                .padding(WindowInsets.safeDrawing.asPaddingValues()),
             horizontalArrangement = Arrangement.Center
         ) {
             repeat(2) { i ->
@@ -220,18 +224,22 @@ private fun Dashboard(
         "Humidity", "Ambient Temp", "Heart Rate", "Step Counter"
     )
 
-    val items = remember(readings) {
+    // NEW (tracks the map’s state properly)
+val items by remember {
+    derivedStateOf {
         readings.entries.sortedWith(
             compareBy(
                 { ordered.indexOf(it.key).let { i -> if (i == -1) Int.MAX_VALUE else i } },
                 { it.key })
         )
     }
+}
+
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(10.dp)
+            .padding(WindowInsets.safeDrawing.asPaddingValues())
             .verticalScroll(rememberScrollState())
     ) {
         Text("Sensor Dashboard", fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -360,62 +368,99 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
     Column(
         Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(WindowInsets.safeDrawing.asPaddingValues()),
     ) {
         Text("Coherence Glyph", fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Spacer(Modifier.height(8.dp))
 
         // Central animated ring + sector overlays
-        Canvas(
-            Modifier
-                .fillMaxWidth()
-                .height(120.dp)
-        ) {
-            val w = size.width
-            val h = size.height
-            val cx = w / 2f
-            val cy = h * 0.55f
-            val baseR = min(w, h) * 0.38f
+        // ---- Concentric rings glyph ----
+Canvas(
+    Modifier
+        .fillMaxWidth()
+        .height(140.dp)
+) {
+    val w = size.width
+    val h = size.height
+    val cx = w / 2f
+    val cy = h / 2f
+    val baseR = min(w, h) * 0.34f
+    val gap = 12f
 
-            // base ring
-            drawArc(
-                color = Color(0x33, 0xFF, 0xFF),
-                startAngle = 0f,
-                sweepAngle = 360f,
-                useCenter = false,
-                style = Stroke(width = 10f, cap = StrokeCap.Round)
-            )
+    // Helper to draw one ring
+    fun ring(radius: Float, pct: Float, track: Color, glow: Color, core: Color) {
+        // track
+        drawArc(
+            color = track,
+            startAngle = -90f,
+            sweepAngle = 360f,
+            useCenter = false,
+            style = Stroke(width = 8f, cap = StrokeCap.Round)
+        )
+        // glow
+        drawArc(
+            color = glow,
+            startAngle = -90f,
+            sweepAngle = 360f * pct.coerceIn(0f, 1f),
+            useCenter = false,
+            style = Stroke(width = 10f, cap = StrokeCap.Round)
+        )
+        // core
+        drawArc(
+            color = core,
+            startAngle = -90f,
+            sweepAngle = (360f * pct).coerceAtLeast(6f),
+            useCenter = false,
+            style = Stroke(width = 5f, cap = StrokeCap.Round)
+        )
+    }
 
-            // coherence ring (glow core)
-            drawArc(
-                color = Color(0x66, 0x00, 0xEA),
-                startAngle = -90f,
-                sweepAngle = 360f * anim.value,
-                useCenter = false,
-                style = Stroke(width = 12f, cap = StrokeCap.Round)
-            )
-            drawArc(
-                color = Color(0xFF, 0xD7, 0x00),
-                startAngle = -90f,
-                sweepAngle = (360f * anim.value).coerceAtLeast(6f),
-                useCenter = false,
-                style = Stroke(width = 6f, cap = StrokeCap.Round)
-            )
+    // Animated values (re-use your computed nAccel, motionStability, hrPresence, envBalance)
+    val accA = nAccel
+    val stabA = motionStability
+    val hrA = hrPresence
+    val envA = envBalance
 
-            // Sector overlays (show relative contributions)
-            fun sector(start: Float, pct: Float, col: Color, rMul: Float = 1f, wMul: Float = 1f) {
-                drawArc(
-                    color = col,
-                    startAngle = start,
-                    sweepAngle = 360f * pct.coerceIn(0f, 1f),
-                    useCenter = false,
-                    style = Stroke(width = 8f * wMul, cap = StrokeCap.Round)
-                )
+    // draw from inner to outer for nice layering
+    withTransform({
+        translate(left = cx, top = cy)
+    }) {
+        // set a local radius for each ring
+        var r = baseR
+        fun drawRing(pct: Float, track: Color, glow: Color, core: Color) {
+            inset(horizontal = -r, vertical = -r) {
+                ring(r, pct, track, glow, core)
             }
-            sector(-90f, nAccel * 0.5f, Color(0x44, 0x00, 0xEA))
-            sector(30f, nGyro * 0.5f, Color(0x44, 0xD0, 0xFF))
-            sector(150f, nRot * 0.5f, Color(0x44, 0xFF, 0xD7))
+            r += gap
         }
+
+        // Inner → Outer: HR, Motion Stability, Accel Presence, Env Balance
+        drawRing(
+            pct = hrA,
+            track = Color(0x22, 0xFF, 0xFF),
+            glow  = Color(0x66, 0x00, 0xEA),
+            core  = Color(0xFF, 0xD7, 0x00)
+        )
+        drawRing(
+            pct = stabA,
+            track = Color(0x22, 0xFF, 0xFF),
+            glow  = Color(0x44, 0xD0, 0xFF),
+            core  = Color(0xAA, 0xFF, 0xFF)
+        )
+        drawRing(
+            pct = accA,
+            track = Color(0x22, 0xFF, 0xFF),
+            glow  = Color(0x55, 0xFF, 0xD7),
+            core  = Color(0xFF, 0xE6, 0x88)
+        )
+        drawRing(
+            pct = envA,
+            track = Color(0x22, 0xFF, 0xFF),
+            glow  = Color(0x44, 0xFF, 0x99),
+            core  = Color(0xDD, 0xFF, 0x99)
+        )
+    }
+}
 
         Spacer(Modifier.height(8.dp))
         // Quick bars for channels under the glyph
