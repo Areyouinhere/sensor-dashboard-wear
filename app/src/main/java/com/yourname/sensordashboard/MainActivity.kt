@@ -1,8 +1,5 @@
 package com.yourname.sensordashboard
 
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.asPaddingValues
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -27,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -53,7 +51,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
-        // After permission, re-register with HR included
         subscribeSensors(registerHeartRate = true)
     }
 
@@ -66,10 +63,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black)
                         .padding(WindowInsets.safeDrawing.asPaddingValues())
+                        .background(Color.Black)
                 ) {
-                    MicrogridParallax()   // subtle rolling grid in the back
+                    MicrogridParallax()
                     PagerRoot(
                         availableSensors = availableSensors,
                         readings = readings
@@ -85,7 +82,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     }
 
     private fun ensurePermissionsThenSubscribe() {
-        // Start all non-sensitive sensors right away
+        // Start non-sensitive sensors immediately
         subscribeSensors(registerHeartRate = false)
 
         val needsBody = ContextCompat.checkSelfPermission(
@@ -103,7 +100,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 )
             )
         } else {
-            // Already granted → add HR now
             subscribeSensors(registerHeartRate = true)
         }
     }
@@ -112,8 +108,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         sensorManager.unregisterListener(this)
 
         fun reg(type: Int, delay: Int = SensorManager.SENSOR_DELAY_UI) {
-            sensorManager.getDefaultSensor(type)?.let { sensor ->
-                sensorManager.registerListener(this, sensor, delay)
+            sensorManager.getDefaultSensor(type)?.let { s ->
+                sensorManager.registerListener(this, s, delay)
             }
         }
 
@@ -131,10 +127,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         reg(Sensor.TYPE_RELATIVE_HUMIDITY)
         reg(Sensor.TYPE_AMBIENT_TEMPERATURE)
 
-        // Steps (no special permission)
+        // Activity (no special permission)
         reg(Sensor.TYPE_STEP_COUNTER)
 
-        // Biometrics (needs BODY_SENSORS)
+        // Biometrics
         if (registerHeartRate) reg(Sensor.TYPE_HEART_RATE)
     }
 
@@ -145,7 +141,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             val raw = event.values.firstOrNull() ?: 0f
             if (stepBaseline == null) stepBaseline = raw
             val session = raw - (stepBaseline ?: raw)
-            readings[key] = floatArrayOf(raw, session) // [total since boot, session]
+            readings[key] = floatArrayOf(raw, session)
             return
         }
 
@@ -161,11 +157,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-
-    override fun onDestroy() {
-        super.onDestroy()
-        sensorManager.unregisterListener(this)
-    }
+    override fun onDestroy() { super.onDestroy(); sensorManager.unregisterListener(this) }
 }
 
 /* ====================== PAGER ROOT ====================== */
@@ -177,11 +169,12 @@ private fun PagerRoot(
 ) {
     val pagerState = rememberPagerState(pageCount = { 2 })
     Column(Modifier.fillMaxSize()) {
-        // Pages: 0 = Dashboard, 1 = Coherence Glyph
         HorizontalPager(
             state = pagerState,
             flingBehavior = PagerDefaults.flingBehavior(state = pagerState),
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
         ) { page ->
             when (page) {
                 0 -> Dashboard(availableSensors, readings)
@@ -189,21 +182,22 @@ private fun PagerRoot(
             }
         }
 
-        // Simple page indicator (two dots)
-        val active = Color(0xFF, 0xD7, 0x00)
-        val idle = Color(0x44, 0xFF, 0xFF)
+        // Simple two-dot indicator, padded for round screens
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(WindowInsets.safeDrawing.asPaddingValues()),
+                .padding(WindowInsets.safeDrawing.asPaddingValues())
+                .padding(bottom = 6.dp),
             horizontalArrangement = Arrangement.Center
         ) {
+            val active = Color(0xFF, 0xD7, 0x00)
+            val idle = Color(0x44, 0xFF, 0xFF)
             repeat(2) { i ->
                 Box(
                     Modifier
-                        .size(if (i == pagerState.currentPage) 8.dp else 6.dp)
+                        .size( if (i == pagerState.currentPage) 8.dp else 6.dp )
                         .clip(RoundedCornerShape(50))
-                        .background(if (i == pagerState.currentPage) active else idle)
+                        .background( if (i == pagerState.currentPage) active else idle )
                 )
                 if (i == 0) Spacer(Modifier.width(6.dp))
             }
@@ -224,22 +218,22 @@ private fun Dashboard(
         "Humidity", "Ambient Temp", "Heart Rate", "Step Counter"
     )
 
-    // NEW (tracks the map’s state properly)
-val items by remember {
-    derivedStateOf {
-        readings.entries.sortedWith(
-            compareBy(
-                { ordered.indexOf(it.key).let { i -> if (i == -1) Int.MAX_VALUE else i } },
-                { it.key })
-        )
+    // Live recompute when map content changes
+    val items by remember {
+        derivedStateOf {
+            readings.entries.sortedWith(
+                compareBy(
+                    { ordered.indexOf(it.key).let { i -> if (i == -1) Int.MAX_VALUE else i } },
+                    { it.key })
+            )
+        }
     }
-}
-
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(WindowInsets.safeDrawing.asPaddingValues())
+            .padding(10.dp)
             .verticalScroll(rememberScrollState())
     ) {
         Text("Sensor Dashboard", fontWeight = FontWeight.Bold, fontSize = 18.sp)
@@ -273,16 +267,10 @@ private fun WaitingPulseDots() {
 
     LaunchedEffect(Unit) {
         scope.launch {
-            while (true) {
-                alpha.animateTo(0.3f, tween(800))
-                alpha.animateTo(1f, tween(800))
-            }
+            while (true) { alpha.animateTo(0.3f, tween(800)); alpha.animateTo(1f, tween(800)) }
         }
         scope.launch {
-            while (true) {
-                delay(500)
-                dots = (dots + 1) % 4
-            }
+            while (true) { delay(500); dots = (dots + 1) % 4 }
         }
     }
 
@@ -313,12 +301,8 @@ private fun SensorCard(name: String, values: FloatArray) {
                 Spacer(Modifier.height(6.dp))
                 NeonHeatBar(name, values)
             }
-            "Heart Rate", "Pressure" -> {
-                BalancedDialBar(name, values)
-            }
-            "Step Counter" -> {
-                StepCounterBar(values)
-            }
+            "Heart Rate", "Pressure" -> BalancedDialBar(name, values)
+            "Step Counter" -> StepCounterBar(values)
             else -> NeonHeatBar(name, values)
         }
     }
@@ -328,143 +312,125 @@ private fun SensorCard(name: String, values: FloatArray) {
 
 @Composable
 private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
-    // Extract a few channels (safe defaults when missing)
-    val accel = readings["Accelerometer"] ?: floatArrayOf(0f, 0f, 0f)
-    val gyro = readings["Gyroscope"] ?: floatArrayOf(0f, 0f, 0f)
-    val rot = readings["Rotation Vector"] ?: floatArrayOf(0f, 0f, 0f)
-    val hr = readings["Heart Rate"]?.getOrNull(0) ?: 0f
-    val pressure = readings["Pressure"]?.getOrNull(0) ?: 1000f
-    val light = readings["Light"]?.getOrNull(0) ?: 0f
+    val accel  = readings["Accelerometer"] ?: floatArrayOf(0f, 0f, 0f)
+    val gyro   = readings["Gyroscope"]     ?: floatArrayOf(0f, 0f, 0f)
+    val rot    = readings["Rotation Vector"] ?: floatArrayOf(0f, 0f, 0f)
+    val hr     = readings["Heart Rate"]?.getOrNull(0) ?: 0f
+    val press  = readings["Pressure"]?.getOrNull(0) ?: 1000f
+    val light  = readings["Light"]?.getOrNull(0) ?: 0f
 
-    // Magnitudes
     val mAccel = magnitude(accel)
-    val mGyro = magnitude(gyro)
-    val mRot = magnitude(rot)
+    val mGyro  = magnitude(gyro)
+    val mRot   = magnitude(rot)
 
-    // Normalize channels (rough, but gives us something alive immediately)
-    val nAccel = (mAccel / 12f).coerceIn(0f, 1f)        // motion
-    val nGyro = (mGyro / 6f).coerceIn(0f, 1f)           // twist
-    val nRot = (mRot / 1.5f).coerceIn(0f, 1f)           // orientation energy
-    val nHR = (hr / 150f).coerceIn(0f, 1f)              // HR band
-    val nP = ((pressure - 980f) / 60f).coerceIn(0f, 1f) // ambient pressure window
-    val nLight = (light / 800f).coerceIn(0f, 1f)        // ambient light
+    val nAccel = (mAccel / 12f).coerceIn(0f, 1f)
+    val nGyro  = (mGyro / 6f).coerceIn(0f, 1f)
+    val nRot   = (mRot / 1.5f).coerceIn(0f, 1f)
+    val nHR    = (hr / 150f).coerceIn(0f, 1f)
+    val nP     = ((press - 980f) / 60f).coerceIn(0f, 1f)
+    val nLight = (light / 800f).coerceIn(0f, 1f)
 
-    // A simple “coherence” blend (tuneable):
-    // - favor stability (low gyro) + presence (accel near gravity) + HR mid-band
     val motionStability = 1f - nGyro
-    val accelPresence = nAccel
-    val hrPresence = 1f - abs(nHR - 0.5f) * 2f          // centered best
-    val envBalance = 1f - abs(nP - 0.5f) * 2f
+    val accelPresence   = nAccel
+    val hrPresence      = 1f - abs(nHR - 0.5f) * 2f
+    val envBalance      = 1f - abs(nP - 0.5f) * 2f
 
     var coh = (0.35f * motionStability +
                0.25f * accelPresence +
                0.25f * hrPresence +
-               0.15f * envBalance)
-    coh = coh.coerceIn(0f, 1f)
+               0.15f * envBalance).coerceIn(0f, 1f)
 
-    val anim = remember { Animatable(0f) }
-    LaunchedEffect(coh) { anim.animateTo(coh, tween(280)) }
+    val cohAnim = remember { Animatable(0f) }
+    LaunchedEffect(coh) { cohAnim.animateTo(coh, tween(280)) }
 
     Column(
         Modifier
             .fillMaxSize()
-            .padding(WindowInsets.safeDrawing.asPaddingValues()),
+            .padding(WindowInsets.safeDrawing.asPaddingValues())
+            .padding(16.dp)
     ) {
-        Text("Coherence Glyph", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text("Coherence", fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Spacer(Modifier.height(8.dp))
 
-        // Central animated ring + sector overlays
-        // ---- Concentric rings glyph ----
-Canvas(
-    Modifier
-        .fillMaxWidth()
-        .height(140.dp)
-) {
-    val w = size.width
-    val h = size.height
-    val cx = w / 2f
-    val cy = h / 2f
-    val baseR = min(w, h) * 0.34f
-    val gap = 12f
+        // ---- Concentric rings (no withTransform/inset) ----
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .height(150.dp)
+        ) {
+            val w = size.width
+            val h = size.height
+            val cx = w / 2f
+            val cy = h / 2f
 
-    // Helper to draw one ring
-    fun ring(radius: Float, pct: Float, track: Color, glow: Color, core: Color) {
-        // track
-        drawArc(
-            color = track,
-            startAngle = -90f,
-            sweepAngle = 360f,
-            useCenter = false,
-            style = Stroke(width = 8f, cap = StrokeCap.Round)
-        )
-        // glow
-        drawArc(
-            color = glow,
-            startAngle = -90f,
-            sweepAngle = 360f * pct.coerceIn(0f, 1f),
-            useCenter = false,
-            style = Stroke(width = 10f, cap = StrokeCap.Round)
-        )
-        // core
-        drawArc(
-            color = core,
-            startAngle = -90f,
-            sweepAngle = (360f * pct).coerceAtLeast(6f),
-            useCenter = false,
-            style = Stroke(width = 5f, cap = StrokeCap.Round)
-        )
-    }
+            fun drawRing(radius: Float, pct: Float, track: Color, glow: Color, core: Color) {
+                val d = radius * 2f
+                val topLeft = Offset(cx - radius, cy - radius)
+                val sz = Size(d, d)
 
-    // Animated values (re-use your computed nAccel, motionStability, hrPresence, envBalance)
-    val accA = nAccel
-    val stabA = motionStability
-    val hrA = hrPresence
-    val envA = envBalance
-
-    // draw from inner to outer for nice layering
-    withTransform({
-        translate(left = cx, top = cy)
-    }) {
-        // set a local radius for each ring
-        var r = baseR
-        fun drawRing(pct: Float, track: Color, glow: Color, core: Color) {
-            inset(horizontal = -r, vertical = -r) {
-                ring(r, pct, track, glow, core)
+                // track 360°
+                drawArc(
+                    color = track,
+                    startAngle = -90f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = sz,
+                    style = Stroke(width = 8f, cap = StrokeCap.Round)
+                )
+                // glow
+                drawArc(
+                    color = glow,
+                    startAngle = -90f,
+                    sweepAngle = 360f * pct.coerceIn(0f, 1f),
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = sz,
+                    style = Stroke(width = 10f, cap = StrokeCap.Round)
+                )
+                // core
+                drawArc(
+                    color = core,
+                    startAngle = -90f,
+                    sweepAngle = (360f * pct).coerceAtLeast(6f),
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = sz,
+                    style = Stroke(width = 5f, cap = StrokeCap.Round)
+                )
             }
-            r += gap
+
+            val baseR = min(w, h) * 0.28f
+            val gap = 14f
+
+            val hrA   = hrPresence
+            val stabA = motionStability
+            val accA  = accelPresence
+            val envA  = envBalance
+
+            drawRing(baseR + gap * 0, hrA,
+                track = Color(0x22, 0xFF, 0xFF),
+                glow  = Color(0x66, 0x00, 0xEA),
+                core  = Color(0xFF, 0xD7, 0x00))
+
+            drawRing(baseR + gap * 1, stabA,
+                track = Color(0x22, 0xFF, 0xFF),
+                glow  = Color(0x44, 0xD0, 0xFF),
+                core  = Color(0xAA, 0xFF, 0xFF))
+
+            drawRing(baseR + gap * 2, accA,
+                track = Color(0x22, 0xFF, 0xFF),
+                glow  = Color(0x55, 0xFF, 0xD7),
+                core  = Color(0xFF, 0xE6, 0x88))
+
+            drawRing(baseR + gap * 3, envA,
+                track = Color(0x22, 0xFF, 0xFF),
+                glow  = Color(0x44, 0xFF, 0x99),
+                core  = Color(0xDD, 0xFF, 0x99))
         }
 
-        // Inner → Outer: HR, Motion Stability, Accel Presence, Env Balance
-        drawRing(
-            pct = hrA,
-            track = Color(0x22, 0xFF, 0xFF),
-            glow  = Color(0x66, 0x00, 0xEA),
-            core  = Color(0xFF, 0xD7, 0x00)
-        )
-        drawRing(
-            pct = stabA,
-            track = Color(0x22, 0xFF, 0xFF),
-            glow  = Color(0x44, 0xD0, 0xFF),
-            core  = Color(0xAA, 0xFF, 0xFF)
-        )
-        drawRing(
-            pct = accA,
-            track = Color(0x22, 0xFF, 0xFF),
-            glow  = Color(0x55, 0xFF, 0xD7),
-            core  = Color(0xFF, 0xE6, 0x88)
-        )
-        drawRing(
-            pct = envA,
-            track = Color(0x22, 0xFF, 0xFF),
-            glow  = Color(0x44, 0xFF, 0x99),
-            core  = Color(0xDD, 0xFF, 0x99)
-        )
-    }
-}
-
-        Spacer(Modifier.height(8.dp))
-        // Quick bars for channels under the glyph
-        ChannelBar("Motion", nAccel)
+        Spacer(Modifier.height(6.dp))
+        ChannelBar("Motion", accelPresence)
         Spacer(Modifier.height(4.dp))
         ChannelBar("Stability", motionStability)
         Spacer(Modifier.height(4.dp))
@@ -472,33 +438,11 @@ Canvas(
         Spacer(Modifier.height(4.dp))
         ChannelBar("Env Balance", envBalance)
         Spacer(Modifier.height(8.dp))
-        Text("coherence: ${(coh * 100).toInt()}%", fontSize = 14.sp)
+        Text("coherence: ${(cohAnim.value * 100).toInt()}%", fontSize = 14.sp)
     }
 }
 
-@Composable
-private fun ChannelBar(label: String, value01: Float) {
-    Text(label, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-    val anim = remember { Animatable(0f) }
-    LaunchedEffect(value01) { anim.animateTo(value01.coerceIn(0f, 1f), tween(220)) }
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(8.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(Color(0x22, 0xFF, 0xFF))
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth(anim.value)
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFF, 0xD7, 0x00))
-        )
-    }
-}
-
-/* ====================== VISUALIZERS (Dashboard) ====================== */
+/* ====================== DASHBOARD VISUALS ====================== */
 
 @Composable
 private fun NeonHeatBar(name: String, values: FloatArray) {
@@ -550,7 +494,6 @@ private fun NeonHeatBar(name: String, values: FloatArray) {
                 .height(10.dp)
                 .background(glow)
         )
-        // core bar centered via padding (no align calls)
         Box(
             Modifier
                 .fillMaxWidth((anim.value * 0.98f).coerceAtLeast(0.02f))
@@ -665,7 +608,6 @@ private fun MotionArcs(name: String, values: FloatArray) {
     val core = Color(0xFF, 0xD7, 0x00)
 
     Canvas(Modifier.fillMaxWidth().height(40.dp)) {
-        // base ring
         drawArc(
             color = ring,
             startAngle = 180f,
@@ -673,7 +615,6 @@ private fun MotionArcs(name: String, values: FloatArray) {
             useCenter = false,
             style = Stroke(width = 6f, cap = StrokeCap.Round)
         )
-        // glow arc
         drawArc(
             color = glow,
             startAngle = 180f,
@@ -681,7 +622,6 @@ private fun MotionArcs(name: String, values: FloatArray) {
             useCenter = false,
             style = Stroke(width = 8f, cap = StrokeCap.Round)
         )
-        // core arc
         drawArc(
             color = core,
             startAngle = 180f,
@@ -747,24 +687,4 @@ private fun prettyValues(name: String, values: FloatArray): String {
     }
 }
 
-private fun magnitude(values: FloatArray): Float {
-    var s = 0f
-    for (v in values) s += v * v
-    return sqrt(s)
-}
-
-private fun labelFor(type: Int): String = when (type) {
-    Sensor.TYPE_ACCELEROMETER       -> "Accelerometer"
-    Sensor.TYPE_GYROSCOPE           -> "Gyroscope"
-    Sensor.TYPE_LINEAR_ACCELERATION -> "Linear Accel"
-    Sensor.TYPE_GRAVITY             -> "Gravity"
-    Sensor.TYPE_ROTATION_VECTOR     -> "Rotation Vector"
-    Sensor.TYPE_MAGNETIC_FIELD      -> "Magnetic"
-    Sensor.TYPE_LIGHT               -> "Light"
-    Sensor.TYPE_PRESSURE            -> "Pressure"
-    Sensor.TYPE_RELATIVE_HUMIDITY   -> "Humidity"
-    Sensor.TYPE_AMBIENT_TEMPERATURE -> "Ambient Temp"
-    Sensor.TYPE_HEART_RATE          -> "Heart Rate"
-    Sensor.TYPE_STEP_COUNTER        -> "Step Counter"
-    else -> "Type $type"
-}
+private fun magnitude(values: FloatArray): Fl
