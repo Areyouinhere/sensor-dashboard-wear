@@ -1,5 +1,6 @@
 package com.yourname.sensordashboard
 
+import androidx.compose.foundation.clickable
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -562,6 +563,69 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
             ring(2, motionStability, Color(0x44, 0xD0, 0xFF), Color(0xAA, 0xFF, 0xFF)) // Gyro stability
             ring(3, accelPresence,   Color(0x55, 0xFF, 0xD7), Color(0xFF, 0xE6, 0x88)) // Accel magnitude
             ring(4, envBalance,      Color(0x44, 0xFF, 0x99), Color(0xDD, 0xFF, 0x99)) // Pressure balance
+
+                    // --- Compact metric readouts under the glyph ---
+        Spacer(Modifier.height(8.dp))
+
+        // Tap the glyph area to toggle extra detail
+        var showDetail by remember { mutableStateOf(false) }
+
+        // Quick single-line summary
+        Text(
+            text = buildString {
+                append("HRV "); append(fmtMs(hrv)); append(" • ")
+                append("HR ");  append(hr.toInt()); append(" bpm • ")
+                append("Motion "); append(fmtPct(1f - nGyro))
+            },
+            fontSize = 12.sp,
+            color = Color(0xCC, 0xFF, 0xFF)
+        )
+
+        Spacer(Modifier.height(4.dp))
+
+        // Secondary line with accel/env
+        Text(
+            text = buildString {
+                append("Accel "); append(fmt1(nAccel)); append(" • ")
+                append("Env ");   append(fmtPct(1f - abs(nP - 0.5f) * 2f))
+            },
+            fontSize = 11.sp,
+            color = Color(0x99, 0xFF, 0xFF)
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        // Tappable hint to show/hide the explainer
+        Text(
+            text = if (showDetail) "Hide explanation ▲" else "What is this? ▼",
+            fontSize = 11.sp,
+            color = Color(0xFF, 0xD7, 0x00),
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .clickable { showDetail = !showDetail }
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+
+        if (showDetail) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                // Short, synchronous, signal-coherent description
+                text =
+                    "The rings show a live coherence field:\n" +
+                    "• Inner (HRV): variability capacity (higher fill = more adaptability).\n" +
+                    "• HR: closeness to a calm mid-zone (fullest near the center band).\n" +
+                    "• Motion: stability from gyroscope (fuller when rotational noise is low).\n" +
+                    "• Accel: movement amplitude (fuller with greater body motion).\n" +
+                    "• Env: barometric centering (fuller near mid-pressure band).\n\n" +
+                    "All inputs are normalized and smoothed (EMA) so changes feel continuous " +
+                    "and reflect trend rather than jitter. Use it as a steady glanceable guide " +
+                    "to orient breath, posture, and pace toward a balanced, responsive state.",
+                fontSize = 11.sp,
+                color = Color(0xAA, 0xFF, 0xFF),
+                lineHeight = 14.sp
+            )
+        }
+
         }
     }
 }
@@ -890,6 +954,12 @@ private fun MicrogridParallax() {
 
 private fun magnitude(values: FloatArray): Float =
     sqrt(values.fold(0f) { s, v -> s + v * v })
+
+// Format helpers for concise, readable UI
+private fun fmtPct(v: Float): String = "${(v.coerceIn(0f,1f)*100f).roundToInt()}%"
+private fun fmtMs(v: Float): String  = "${v.roundToInt()} ms"
+private fun fmt1(v: Float): String   = "%.1f".format(v.coerceIn(0f,1f))
+
 
 private fun labelFor(type: Int): String = when (type) {
     Sensor.TYPE_ACCELEROMETER       -> "Accelerometer"
