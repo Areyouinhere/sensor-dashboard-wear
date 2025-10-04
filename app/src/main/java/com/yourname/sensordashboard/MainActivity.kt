@@ -1,5 +1,6 @@
 package com.yourname.sensordashboard
 
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.clickable
 import android.content.Context
@@ -393,7 +394,22 @@ private fun Dashboard(
             .padding(10.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Sensor Dashboard", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text(
+            "Sensor Dashboard",
+            fontWeight = FontWeight.Bold,
+            fontSize = 18.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .wrapContentWidth(Alignment.CenterHorizontally)
+        )
+        Spacer(Modifier.height(4.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .clip(RoundedCornerShape(0.dp))
+                .background(Color(0x22, 0xFF, 0xFF))
+        )
         Spacer(Modifier.height(6.dp))
 
         if (readings.isEmpty()) {
@@ -421,19 +437,33 @@ private fun LiveValuesLine(values: FloatArray) {
 private fun SensorCard(name: String, values: FloatArray) {
     Text(name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     LiveValuesLine(values)
+    Box(
+    Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(12.dp))
+        .background(Color(0x10, 0xFF, 0xFF))
+        .padding(8.dp)
+) {
+    // Move the existing when(name) { ... } content INSIDE this Box
+    when (name) {
+        // ... your cases as-is ...
+    }
+}
+Spacer(Modifier.height(10.dp))
+
 
     when (name) {
         "Gyroscope" -> {
             GyroWaveform(SensorHistory.gyroX, SensorHistory.gyroY, SensorHistory.gyroZ)
         }
         "Gravity" -> {
-            val dev = magnitude(values) - 9.81f // show deviation so tilt/motion appears
-            CenteredZeroBar(dev, visualRange = 2f)
-        }
-        "Linear Accel" -> {
-            val mag = magnitude(values)
-            CenteredZeroBar(mag, visualRange = 10f)
-        }
+    val dev = magnitude(values) - 9.81f
+    CenteredZeroBar(dev, visualRange = 0.8f)  // was 2f; gravity wiggles are subtle
+}
+"Linear Accel" -> {
+    val mag = magnitude(values)
+    CenteredZeroBar(mag, visualRange = 4f)    // was 10f; more responsive to steps
+}
         "Rotation Vector" -> {
             val ori = orientationDegState.value
             RotationPseudo3D(
@@ -451,20 +481,20 @@ private fun SensorCard(name: String, values: FloatArray) {
             MagneticDial(heading = heading, strengthNorm = magScale.norm(mag))
         }
         "Light" -> {
-            val lux = values.getOrNull(0) ?: 0f
-            val logNorm = (ln(1f + lux) / ln(1f + 20000f)).coerceIn(0f, 1f)
-            val adaptive = lightScale.norm(logNorm * 20000f)
-            NeonHeatBarNormalized(adaptive)
-        }
-        "Heart Rate" -> {
-            val bpm = values.getOrNull(0) ?: 0f
-            HeartPulse(bpm = bpm.coerceIn(30f, 220f))
-        }
-        "HRV" -> {
-            val rmssd = values.getOrNull(0) ?: 0f
-            // HRV is centered coherence capacity; show around a mid band
-            CenteredZeroBar(rmssd - 50f, visualRange = 100f) // roughly 0..100+ ms centered ~50
-        }
+    val lux = values.getOrNull(0) ?: 0f
+    val logNorm = (ln(1f + lux) / ln(1f + 20000f)).coerceIn(0f, 1f)
+    val adaptive = lightScale.norm(logNorm * 20000f)
+    NeonHeatBarNormalized(adaptive)
+}
+"Heart Rate" -> {
+    val bpm = values.getOrNull(0) ?: 0f
+    HeartPulse(bpm = bpm.coerceIn(30f, 200f))
+}
+"HRV" -> {
+    val rmssd = values.getOrNull(0) ?: 0f
+    // center ~50 ms, typical wrist range 0–80 ms
+    CenteredZeroBar(rmssd - 50f, visualRange = 80f)
+}
         else -> {
             NeonHeatBar(name, values)
         }
@@ -508,11 +538,12 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
     // Local UI state (must be inside a Composable)
     var showDetail by remember { mutableStateOf(false) }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+Column(
+    Modifier
+        .fillMaxSize()
+        .padding(16.dp)
+        .verticalScroll(rememberScrollState())   // <- ensures text under the glyph is visible
+) {
         Text(
     "Coherence",
     fontWeight = FontWeight.Bold,
@@ -521,13 +552,20 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
         .fillMaxWidth()
         .wrapContentWidth(Alignment.CenterHorizontally)
 )
-        Spacer(Modifier.height(8.dp))
-
+        Spacer(Modifier.height(4.dp))
+Box(
+    Modifier
+        .fillMaxWidth()
+        .height(1.dp)
+        .clip(RoundedCornerShape(0.dp))
+        .background(Color(0x22, 0xFF, 0xFF))
+)
+Spacer(Modifier.height(6.dp))
         // The glyph
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(180.dp)
+                .height(150.dp) // was 180.dp; 150 gives room for the text on round screens
         ) {
             val cx = size.width / 2f
             val cy = size.height / 2f
@@ -535,10 +573,48 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
             val gap = 14f
 
             fun ring(idx: Int, pct: Float, glow: Color, core: Color) {
-                val r = baseR + gap * idx
-                val d = r * 2f
-                val topLeft = Offset(cx - r, cy - r)
-                val sz = Size(d, d)
+                // --- Human-calibrated norms with soft knees ---
+fun soft01(x: Float) = x.coerceIn(0f, 1f)
+fun softKnee(x: Float, knee: Float = 0.6f): Float {
+    // gentle ease-in toward the top end so it doesn’t peg too fast
+    val t = x.coerceIn(0f, 1f)
+    return if (t < knee) t / knee * 0.7f else 0.7f + (t - knee) / (1f - knee) * 0.3f
+}
+
+// Raw values
+val accelMag = magnitude(accel)                 // m/s²
+val gyroMag  = magnitude(gyro)                  // rad/s
+val hPa      = press                            // hPa
+val bpm      = hr
+val rmssd    = hrv                              // ms
+
+// Accel: normal walking/jostle ~ 0.5–4 m/s² beyond gravity baseline
+val nAccel = soft01((accelMag / 6f))            // up to ~6 m/s² feels lively
+// Gyro: everyday wrist rotation rarely exceeds ~3–4 rad/s
+val nGyro  = soft01((gyroMag  / 4f))            // more sensitive
+// HR: coherence centered ~55–75 bpm; map to closeness-to-midband
+val hrMid  = 65f
+val hrSpan = 50f                                // 40–90 ±
+val nHR    = soft01(0.5f + (bpm - hrMid) / (2f * hrSpan)) // normalized band
+// Pressure: normalize to 980–1050 hPa
+val nP     = soft01((hPa - 980f) / 70f)
+// HRV (RMSSD): a practical live range 0–80 ms on the wrist
+val nHRV   = soft01(rmssd / 80f)
+
+// Smooth (EMA) as you already do
+val ema = remember { mutableStateOf(floatArrayOf(nAccel, nGyro, nHR, nP, nHRV)) }
+val alpha = 0.12f
+val target = floatArrayOf(nAccel, nGyro, nHR, nP, nHRV)
+val smoothed = FloatArray(5) { i -> ema.value[i] + alpha * (target[i] - ema.value[i]) }
+ema.value = smoothed
+
+// Map to rings (presence/balance)
+val hrvPresence      = softKnee(smoothed[4])                               // variability capacity
+val hrPresence       = softKnee(1f - kotlin.math.abs(smoothed[2]-0.5f)*2f) // closeness to calm band
+val motionStability  = softKnee(1f - smoothed[1])                          // calmer with less rotation
+val accelPresence    = softKnee(smoothed[0])                                // movement amplitude
+val envBalance       = softKnee(1f - kotlin.math.abs(smoothed[3]-0.5f)*2f) // barometric center
+
 
                 drawArc(
                     color = Color(0x22, 0xFF, 0xFF),
@@ -570,11 +646,13 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
             }
 
             // 0 = innermost
-            ring(0, hrvPresence,     Color(0x44, 0xFF, 0xAA), Color(0xFF, 0xCC, 0x66)) // HRV
-            ring(1, hrPresence,      Color(0x66, 0x00, 0xEA), Color(0xFF, 0xD7, 0x00)) // HR
-            ring(2, motionStability, Color(0x44, 0xD0, 0xFF), Color(0xAA, 0xFF, 0xFF)) // Gyro stability
-            ring(3, accelPresence,   Color(0x55, 0xFF, 0xD7), Color(0xFF, 0xE6, 0x88)) // Accel magnitude
-            ring(4, envBalance,      Color(0x44, 0xFF, 0x99), Color(0xDD, 0xFF, 0x99)) // Pressure balance
+// 0 = innermost (subtle neon tweak for readability)
+ring(0, hrvPresence,     Color(0x55, 0xFF, 0xAA), Color(0xFF, 0xCC, 0x66)) // HRV (amber-green)
+ring(1, hrPresence,      Color(0x66, 0x80, 0xFF), Color(0xFF, 0xE0, 0x80)) // HR (indigo → warm)
+ring(2, motionStability, Color(0x55, 0xD0, 0xFF), Color(0xAA, 0xFF, 0xFF)) // Gyro stability (cyan)
+ring(3, accelPresence,   Color(0x66, 0xFF, 0xD7), Color(0xFF, 0xE6, 0x88)) // Accel (teal → gold)
+ring(4, envBalance,      Color(0x55, 0xFF, 0x99), Color(0xDD, 0xFF, 0x99)) // Env (greenish)
+
         }
 
         // --- Compact metric readouts under the glyph ---
@@ -670,22 +748,22 @@ private fun WaitingPulseDots() {
 @Composable
 private fun NeonHeatBar(name: String, values: FloatArray) {
     val mag = magnitude(values)
-    val scale = when (name) {
-        "Accelerometer" -> 20f
-        "Linear Accel"  -> 12f
-        "Gravity"       -> 12f
-        "Gyroscope"     -> 6f
-        "Rotation Vector" -> 1.5f
-        "Light"         -> 800f
-        "Magnetic"      -> 120f
-        "Humidity"      -> 100f
-        "Ambient Temp"  -> 60f
-        "Heart Rate"    -> 200f
-        "Pressure"      -> 1100f
-        "Step Counter"  -> 20000f
-        "HRV"           -> 120f
-        else -> 50f
-    }
+   val scale = when (name) {
+    "Accelerometer" -> 8f   // was 20
+    "Linear Accel"  -> 4f   // was 12
+    "Gravity"       -> 1.2f // was 12 (but Gravity uses CenteredZeroBar above)
+    "Gyroscope"     -> 4f   // was 6
+    "Rotation Vector" -> 1.5f
+    "Light"         -> 800f // ignored by custom block above; keep as guard
+    "Magnetic"      -> 80f  // was 120
+    "Humidity"      -> 100f
+    "Ambient Temp"  -> 40f  // was 60 (more touchy)
+    "Heart Rate"    -> 160f // was 200
+    "Pressure"      -> 60f  // was 1100 (we show env on glyph; keep bar responsive)
+    "Step Counter"  -> 20000f
+    "HRV"           -> 80f  // was 120
+    else -> 50f
+}
     NeonHeatBarNormalized((mag / scale).coerceIn(0f, 1f))
 }
 
@@ -942,7 +1020,7 @@ private fun MicrogridParallax() {
         val spacing = 20f
         val w = size.width
         val h = size.height
-        val line = Color(0x17, 0xFF, 0xFF)
+        val line = Color(0x13, 0xFF, 0xFF)
 
         var x = -phase
         while (x < w) {
