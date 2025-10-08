@@ -1,5 +1,9 @@
 package com.yourname.sensordashboard
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.Alignment
+import java.time.LocalDate
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -274,6 +278,116 @@ private object HRVSmoother {
     }
 }
 
+/* ================= COMPASS MODELS ================= */
+
+private data class Session(val type: String, val minutes: Int)
+
+private data class DayMetrics(
+    val date: String,
+    val tstMin: Int?,
+    val deepMin: Int?,
+    val remMin: Int?,
+    val sleepHR: Int?,
+    val sleepHRVms: Float?,
+    val steps: Int?,
+    val sessions: List<Session> = emptyList(),
+    val weightLb: Float?,
+    val mood1to5: Int?,
+    val jointsOk: Boolean?
+)
+
+private object HistoryStore {
+    private val days = mutableStateListOf<DayMetrics>()
+    fun upsert(day: DayMetrics) {
+        val i = days.indexOfFirst { it.date == day.date }
+        if (i >= 0) days[i] = day else { days.add(day); days.sortBy { it.date } }
+    }
+    fun lastNDays(n: Int) = days.takeLast(n)
+    fun todayOrNull(date: String) = days.lastOrNull { it.date == date }
+}
+
+/* ================= COMPASS COMPUTE ================= */
+
+private fun mean(vals: List<Float>) = if (vals.isEmpty()) 0f else vals.sum() / vals.size
+private fun stdev(vals: List<Float>): Float {
+    if (vals.size < 2) return 0f
+    val m = mean(vals)
+    val v = vals.fold(0f) { s, x -> s + (x - m)*(x - m) } / (vals.size - 1)
+    return kotlin.math.sqrt(v)
+}
+
+private fun acuteChronicLoad(history: List<DayMetrics>): Float {
+    fun dayLoad(d: DayMetrics): Float {
+        var pts = 0f
+        d.sessions.forEach { s ->
+            pts += when (s.type.lowercase()) {
+                "strength", "power" -> 2.0f
+                "vr", "flow"        -> 1.5f
+                "walk"              -> 1.0f
+                else -> 0f
+            }
+        }
+        if ((d.steps ?: 0) > 14_000) pts += 0.5f
+        return pts
+    }
+
+    val last7 = history.takeLast(7)
+    val last28 = history.takeLast(28)
+    val acute = last7.sumOf { dayLoad(it).toDouble() }.toFloat()
+    val chronicAvgPerDay = if (last28.isEmpty()) 0f
+        else last28.sumOf { dayLoad(it).toDouble() }.toFloat() / last28.size
+    val chronic = chronicAvgPerDay * 7f
+    return if (chronic <= 1e-6f) 1f else (acute / chronic)
+}
+
+private data class ReadinessResult(
+    val readiness: String,
+    val zHR: Float,
+    val zHRV: Float,
+    val acwr: Float,
+    val coherentSleep: Boolean
+)
+
+private fun computeReadiness(today: DayMetrics, history: List<DayMetrics>): ReadinessResult {
+    val last21 = history.takeLast(21)
+    val hrList  = last21.mapNotNull { it.sleepHR?.toFloat() }
+    val hrvList = last21.mapNotNull { it.sleepHRVms }
+    val muHR = mean(hrList); val sdHR = stdev(hrList)
+    val muHRV = mean(hrvList); val sdHRV = stdev(hrvList)
+
+    val zHR  = if (sdHR  <= 1e-6f || today.sleepHR  == null) 0f else (today.sleepHR  - muHR)  / sdHR
+    val zHRV = if (sdHRV <= 1e-6f || today.sleepHRVms == null) 0f else (today.sleepHRVms - muHRV) / sdHRV
+
+    val last7 = history.takeLast(7)
+    val mean7HRV = last7.mapNotNull { it.sleepHRVms }.let { if (it.isEmpty()) 0f else mean(it) }
+    val hrvOk = today.sleepHRVms != null &&
+        today.sleepHRVms >= 0.8f * mean7HRV && zHRV > -0.5f
+
+    val tst = today.tstMin ?: 0
+    val deep = today.deepMin ?: 0
+    val rem = today.remMin ?: 0
+    val deepRem = deep + rem
+    val sleepDensity = if (tst <= 0) 0f else deepRem.toFloat() / tst.toFloat()
+    val coherentSleep = ((tst in 330..390) && (deepRem >= 195 || sleepDensity >= 0.45f)) || (tst >= 420)
+
+    val hrOk = zHR < 0.5f && !(history.takeLast(2).all { (it.sleepHR ?: 0) > 65 })
+    val jmOk = (today.jointsOk == true) && ((today.mood1to5 ?: 0) >= 3)
+
+    var pts = 0
+    if (coherentSleep) pts++
+    if (hrvOk) pts++
+    if (hrOk) pts++
+    if (jmOk) pts++
+
+    val acwr = acuteChronicLoad(history)
+    val readiness = when {
+        pts >= 3 && acwr in 0.8f..1.3f -> "GREEN"
+        pts <= 1 || (tst < 330 && (history.lastOrNull()?.tstMin ?: 999) < 330) -> "RED"
+        else -> "YELLOW"
+    }
+    return ReadinessResult(readiness, zHR, zHRV, acwr, coherentSleep)
+}
+
 /* ================= HISTORY BUFFERS ================= */
 
 private object SensorHistory {
@@ -323,7 +437,7 @@ private fun PagerRoot(
     availableSensors: List<String>,
     readings: Map<String, FloatArray>
 ) {
-    val pagerState = rememberPagerState(pageCount = { 2 })
+    val pagerState = rememberPagerState(pageCount = { 3 })
     Column(Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
@@ -335,6 +449,7 @@ private fun PagerRoot(
             when (page) {
                 0 -> Dashboard(availableSensors, readings)
                 else -> CoherenceGlyphPage(readings)
+                else -> CompassPage(readings)
             }
         }
         Row(
@@ -346,6 +461,8 @@ private fun PagerRoot(
             Dot(active = pagerState.currentPage == 0)
             Spacer(Modifier.width(6.dp))
             Dot(active = pagerState.currentPage == 1)
+            Spacer(Modifier.width(6.dp))
+            Dot(active = pagerState.currentPage == 2)
         }
     }
 }
@@ -999,6 +1116,34 @@ private fun MicrogridParallax() {
             y += spacing
         }
     }
+}
+
+@Composable
+private fun Pill(text: String, active: Boolean = true, onClick: (() -> Unit)? = null) {
+    Box(
+        Modifier.clip(RoundedCornerShape(999.dp))
+            .background(if (active) Color(0x22,0xFF,0xFF) else Color(0x11,0xFF,0xFF))
+            .clickable(enabled = onClick != null) { onClick?.invoke() }
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) { Text(text, fontSize = 12.sp) }
+}
+
+@Composable
+private fun SmallField(label: String, value: String, onChange: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(label, fontSize = 11.sp, color = Color(0x99,0xFF,0xFF))
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0x14,0xFF,0xFF))
+                .padding(6.dp),
+            textStyle = MaterialTheme.typography.body2.copy(fontSize = 12.sp)
+        )
+    }
+    Spacer(Modifier.height(6.dp))
 }
 
 /* ================= UTILITIES ================= */
