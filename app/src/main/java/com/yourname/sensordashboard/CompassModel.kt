@@ -1,24 +1,15 @@
 package com.yourname.sensordashboard
 
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sqrt
+import kotlin.math.min
 
-/**
- * Minimal snapshot for the Compass. Keep it small & robust.
- * (If you later want sleep, REM/Deep, mood, etc., add nullable fields here.)
- */
 data class DaySnapshot(
     val hrNow: Int,        // bpm
     val hrvNow: Int,       // RMSSD ms
     val stepsToday: Int    // steps (session delta or daily)
 )
 
-/**
- * Rolling window for personal baselines (HR / HRV), default 21 days.
- */
 class Rolling(private val window: Int = 21) {
     private val hr = ArrayList<Int>()
     private val hrv = ArrayList<Int>()
@@ -52,7 +43,6 @@ class Rolling(private val window: Int = 21) {
         return sqrt(varSum / (hrv.size - 1))
     }
 
-    /** 7-day mean for % change checks (returns null if not enough samples). */
     fun last7MeanHRV(): Double? {
         if (hrv.isEmpty()) return null
         val take = min(7, hrv.size)
@@ -60,10 +50,6 @@ class Rolling(private val window: Int = 21) {
     }
 }
 
-/**
- * Compass – turns a DaySnapshot + Rolling baselines into a ternary state.
- * Keep it simple and fast (guardrails, not prescriptions).
- */
 object Compass {
     enum class State { GREEN, YELLOW, RED }
     data class Result(val state: State, val notes: List<String>)
@@ -71,7 +57,6 @@ object Compass {
     fun readiness(day: DaySnapshot, hist: Rolling): Result {
         val notes = mutableListOf<String>()
 
-        // z-scores (safe)
         val muHR = hist.muHR()
         val sdHR = hist.sdHR().coerceAtLeast(1e-6)
         val zHR = (day.hrNow - muHR) / sdHR
@@ -80,19 +65,17 @@ object Compass {
         val sdHRV = hist.sdHRV().coerceAtLeast(1e-6)
         val zHRV = (day.hrvNow - muHRV) / sdHRV
 
-        // 20 % drop rule for HRV vs last-7 mean
         val last7 = hist.last7MeanHRV()
         val hrvDrop20 = last7?.let { day.hrvNow < 0.8 * it } ?: false
 
-        // Simple point system (0..4)
         var pts = 0
         if (zHRV > -0.5 && !hrvDrop20) { pts += 1 } else notes += "HRV off baseline"
-        if (zHR   <  0.5) { pts += 1 } else notes += "HR elevated vs baseline"
+        if (zHR   <  0.5)              { pts += 1 } else notes += "HR elevated vs baseline"
         if (day.stepsToday in 6000..12000) { pts += 1 } else {
-            if (day.stepsToday < 4000) notes += "Very low movement"
+            if (day.stepsToday < 4000)  notes += "Very low movement"
             if (day.stepsToday > 14000) notes += "High-load steps"
         }
-        // Placeholder for joints/mood if you add them later; give 1 free point for now
+        // Placeholder for subjective checks
         pts += 1
 
         val state = when {
