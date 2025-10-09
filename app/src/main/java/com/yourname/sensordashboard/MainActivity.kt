@@ -795,30 +795,6 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
     }
 }
 
-@Composable
-private fun CompassPage(readings: Map<String, FloatArray>) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        Text(
-            "Compass",
-            fontWeight = FontWeight.Bold,
-            fontSize = 18.sp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .wrapContentWidth(Alignment.CenterHorizontally)
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Coming soon — readiness logic + daily resonance.",
-            fontSize = 12.sp,
-            color = Color(0xAA, 0xFF, 0xFF)
-        )
-    }
-}
-
 /* ================= VISUAL HELPERS ================= */
 
 @Composable
