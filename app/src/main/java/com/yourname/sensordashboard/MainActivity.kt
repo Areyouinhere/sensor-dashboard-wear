@@ -27,7 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.ui.Alignment as UiAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -507,7 +507,7 @@ private fun Dashboard(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(10.dp)
+            .padding(12.dp)
             .verticalScroll(rememberScrollState())
     ) {
         Text(
@@ -516,7 +516,7 @@ private fun Dashboard(
             fontSize = 18.sp,
             modifier = Modifier
                 .fillMaxWidth()
-                .wrapContentWidth(Alignment.CenterHorizontally)
+                .wrapContentWidth(UIAlignment.CenterHorizontally)
         )
         Spacer(Modifier.height(4.dp))
         Box(
@@ -667,7 +667,7 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
             fontSize = 18.sp,
             modifier = Modifier
                 .fillMaxWidth()
-                .wrapContentWidth(Alignment.CenterHorizontally)
+                .wrapContentWidth(UIAlignment.CenterHorizontally)
         )
         Spacer(Modifier.height(4.dp))
         Box(
