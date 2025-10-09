@@ -296,21 +296,6 @@ object HRVSmoother {
     }
 }
 
-/* ================= COMPASS MODELS ================= */
-
-private data class Session(val type: String, val minutes: Int)
-
-
-
-object HistoryStore {
-    private val days = mutableStateListOf<DayMetrics>()
-    fun upsert(day: DayMetrics) {
-        val i = days.indexOfFirst { it.date == day.date }
-        if (i >= 0) days[i] = day else { days.add(day); days.sortBy { it.date } }
-    }
-    fun lastNDays(n: Int) = days.takeLast(n)
-    fun todayOrNull(date: String) = days.lastOrNull { it.date == date }
-}
 
 /* ================= HISTORY BUFFERS ================= */
 
