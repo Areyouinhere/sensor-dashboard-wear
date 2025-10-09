@@ -233,7 +233,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
 /* ================= HRV HISTORY (compressed + smoothed) ================= */
 
-private object HRVHistory {
+object HRVHistory {
     private val rrIntervals = mutableStateListOf<Float>() // ms
     private var lastBeatMs: Long? = null
 
@@ -270,7 +270,7 @@ private object HRVHistory {
     }
 }
 
-private object HRVSmoother {
+object HRVSmoother {
     private var last = 0f
     fun filter(v: Float, alpha: Float = 0.15f): Float {
         last += alpha * (v - last)
@@ -296,7 +296,7 @@ private data class DayMetrics(
     val jointsOk: Boolean?
 )
 
-private object HistoryStore {
+object HistoryStore {
     private val days = mutableStateListOf<DayMetrics>()
     fun upsert(day: DayMetrics) {
         val i = days.indexOfFirst { it.date == day.date }
@@ -390,7 +390,7 @@ private fun computeReadiness(today: DayMetrics, history: List<DayMetrics>): Read
 
 /* ================= HISTORY BUFFERS ================= */
 
-private object SensorHistory {
+object SensorHistory {
     val gyroX = mutableStateListOf<Float>()
     val gyroY = mutableStateListOf<Float>()
     val gyroZ = mutableStateListOf<Float>()
