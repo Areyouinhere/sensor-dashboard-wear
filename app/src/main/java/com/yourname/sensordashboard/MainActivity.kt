@@ -300,19 +300,7 @@ object HRVSmoother {
 
 private data class Session(val type: String, val minutes: Int)
 
-private data class DayMetrics(
-    val date: String,
-    val tstMin: Int?,
-    val deepMin: Int?,
-    val remMin: Int?,
-    val sleepHR: Int?,
-    val sleepHRVms: Float?,
-    val steps: Int?,
-    val sessions: List<Session> = emptyList(),
-    val weightLb: Float?,
-    val mood1to5: Int?,
-    val jointsOk: Boolean?
-)
+
 
 object HistoryStore {
     private val days = mutableStateListOf<DayMetrics>()
@@ -334,20 +322,6 @@ private fun stdev(vals: List<Float>): Float {
     return kotlin.math.sqrt(v)
 }
 
-private fun acuteChronicLoad(history: List<DayMetrics>): Float {
-    fun dayLoad(d: DayMetrics): Float {
-        var pts = 0f
-        d.sessions.forEach { s ->
-            pts += when (s.type.lowercase()) {
-                "strength", "power" -> 2.0f
-                "vr", "flow"        -> 1.5f
-                "walk"              -> 1.0f
-                else -> 0f
-            }
-        }
-        if ((d.steps ?: 0) > 14_000) pts += 0.5f
-        return pts
-    }
 
     val last7 = history.takeLast(7)
     val last28 = history.takeLast(28)
