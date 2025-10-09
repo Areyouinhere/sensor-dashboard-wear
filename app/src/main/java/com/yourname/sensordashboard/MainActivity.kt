@@ -3,7 +3,6 @@ package com.yourname.sensordashboard
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.ui.Alignment
 import java.time.LocalDate
 import android.content.Context
 import android.hardware.Sensor
@@ -27,7 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment as UiAlignment
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -516,7 +515,7 @@ private fun Dashboard(
             fontSize = 18.sp,
             modifier = Modifier
                 .fillMaxWidth()
-                .wrapContentWidth(UIAlignment.CenterHorizontally)
+                .wrapContentWidth(Alignment.CenterHorizontally)
         )
         Spacer(Modifier.height(4.dp))
         Box(
@@ -667,7 +666,7 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
             fontSize = 18.sp,
             modifier = Modifier
                 .fillMaxWidth()
-                .wrapContentWidth(UIAlignment.CenterHorizontally)
+                .wrapContentWidth(Alignment.CenterHorizontally)
         )
         Spacer(Modifier.height(4.dp))
         Box(
