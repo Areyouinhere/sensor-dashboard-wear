@@ -44,6 +44,24 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.*
 
+// Public, tiny daily snapshot used by helpers (HR bpm, RMSSD ms, steps)
+data class DayMetrics(
+    val hrNow: Int,
+    val hrvNow: Int,
+    val stepsToday: Int
+)
+
+// Make or keep this PRIVATE so it doesn't "expose" DayMetrics publicly
+private fun readingsToDayMetrics(readings: Map<String, FloatArray>): DayMetrics {
+    val hr = readings["Heart Rate"]?.getOrNull(0)?.roundToInt() ?: 0
+    val hrv = HRVHistory.rmssd().roundToInt()
+    // session steps = Step Counter [1] (we stored raw at [0], session at [1])
+    val steps = readings["Step Counter"]?.getOrNull(1)?.roundToInt() ?: 0
+    return DayMetrics(hrNow = hr, hrvNow = hrv, stepsToday = steps)
+}
+
+// If you have any other DayMetrics helpers that were 'fun ...', mark them 'private fun ...'
+
 /* ================= GLOBAL SIGNAL BUS / SCALERS ================= */
 
 // Orientation (azimuth, pitch, roll) in degrees
