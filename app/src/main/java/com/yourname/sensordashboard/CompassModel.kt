@@ -1,67 +1,114 @@
 package com.yourname.sensordashboard
 
-import kotlin.math.max
-import kotlin.math.sqrt
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.wear.compose.material.Text
+import kotlin.math.roundToInt
 
-data class DaySnapshot(
-    val hrNow: Int = 0,
-    val hrvNow: Int = 0,      // RMSSD, ms
-    val stepsToday: Int = 0
-)
+@Composable
+fun CompassPage(readings: Map<String, FloatArray>) {
+    // Keep a rolling baseline of your HR/HRV so Compass can compute z-scores
+    val rolling = remember { Rolling(21) }
 
-class Rolling(val max: Int = 21) {
-    private val hr = ArrayDeque<Int>()
-    private val hrv = ArrayDeque<Int>()
+    // Ingest the latest snapshot each recomposition (guarded for zeros)
+    val day = readingsToDayMetricsCompat(readings)
+    LaunchedEffect(day.hrNow, day.hrvNow) {
+        if (day.hrNow > 0)  rolling.pushHR(day.hrNow)
+        if (day.hrvNow > 0) rolling.pushHRV(day.hrvNow)
+    }
 
-    fun pushHR(v: Int) { hr += v; while (hr.size > max) hr.removeFirst() }
-    fun pushHRV(v: Int) { hrv += v; while (hrv.size > max) hrv.removeFirst() }
+    val result = remember(day, rolling.muHR(), rolling.muHRV()) {
+        // Convert to the Compass DaySnapshot
+        val snap = DaySnapshot(
+            hrNow = day.hrNow,
+            hrvNow = day.hrvNow,
+            stepsToday = day.stepsToday
+        )
+        Compass.readiness(snap, rolling)
+    }
 
-    fun muHR(): Double  = if (hr.isEmpty()) 0.0 else hr.map { it.toDouble() }.average()
-    fun sdHR(): Double  = stdev(hr.map { it.toDouble() })
-    fun muHRV(): Double = if (hrv.isEmpty()) 0.0 else hrv.map { it.toDouble() }.average()
-    fun sdHRV(): Double = stdev(hrv.map { it.toDouble() })
+    val stateColor = when (result.state) {
+        Compass.State.GREEN  -> Color(0x55, 0xFF, 0x99)
+        Compass.State.YELLOW -> Color(0xFF, 0xD7, 0x00)
+        Compass.State.RED    -> Color(0xFF, 0x66, 0x66)
+    }
 
-    private fun stdev(xs: List<Double>): Double {
-        if (xs.size < 2) return 0.0
-        val m = xs.average()
-        val v = xs.sumOf { (it - m) * (it - m) } / (xs.size - 1)
-        return sqrt(v)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(14.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            "Compass",
+            fontWeight = FontWeight.Bold,
+            fontSize = 18.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .wrapContentWidth(Alignment.CenterHorizontally)
+        )
+        Spacer(Modifier.height(6.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Color(0x22, 0xFF, 0xFF))
+        )
+        Spacer(Modifier.height(10.dp))
+
+        // Big status
+        Text(
+            text = when (result.state) {
+                Compass.State.GREEN  -> "GREEN — Build / Explore"
+                Compass.State.YELLOW -> "YELLOW — Groove / Technique"
+                Compass.State.RED    -> "RED — Heal / Restore"
+            },
+            fontSize = 16.sp,
+            color = stateColor
+        )
+
+        Spacer(Modifier.height(10.dp))
+        // Current vitals row
+        Text(
+            text = "HR ${day.hrNow} bpm • HRV ${day.hrvNow} ms • Steps ${day.stepsToday}",
+            fontSize = 12.sp,
+            color = Color(0xCC, 0xFF, 0xFF)
+        )
+
+        Spacer(Modifier.height(8.dp))
+        result.notes.forEach { line ->
+            Text("• $line", fontSize = 12.sp, color = Color(0xAA, 0xFF, 0xFF))
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Coming soon: one-tap “Daily Check” + session selector.",
+            fontSize = 11.sp,
+            color = Color(0x88, 0xFF, 0xFF)
+        )
     }
 }
 
-object Compass {
-    data class Result(val state: State, val notes: List<String>)
-    enum class State { GREEN, YELLOW, RED }
-
-    fun readiness(day: DaySnapshot, roll: Rolling): Result {
-        val muHr  = roll.muHR()
-        val sdHr  = max(1e-6, roll.sdHR())
-        val muHrv = roll.muHRV()
-        val sdHrv = max(1e-6, roll.sdHRV())
-
-        val zHr  = ((day.hrNow  - muHr ) / sdHr ).toFloat()
-        val zHrv = ((day.hrvNow - muHrv) / sdHrv).toFloat()
-
-        var pts = 0
-        val notes = mutableListOf<String>()
-
-        if (day.hrvNow >= 0.8 * muHrv && zHrv > -0.5f) { pts++; notes += "HRV holding" }
-        else notes += "HRV downshift"
-
-        if (zHr < 0.5f) { pts++; notes += "HR centered" }
-        else notes += "HR elevated"
-
-        when {
-            day.stepsToday < 4000  -> notes += "Low movement → recovery bias"
-            day.stepsToday > 14000 -> notes += "High load → groove/technique"
-            else                   -> notes += "Movement in sweet spot"
-        }
-
-        val state = when {
-            pts >= 2 -> State.GREEN
-            pts == 1 -> State.YELLOW
-            else     -> State.RED
-        }
-        return Result(state, notes)
-    }
+/**
+ * Small adapter so CompassPage can be dropped in without touching MainActivity code.
+ * Uses session steps if present.
+ */
+private fun readingsToDayMetricsCompat(readings: Map<String, FloatArray>): DayMetrics {
+    val hr   = readings["Heart Rate"]?.getOrNull(0)?.roundToInt() ?: 0
+    val hrv  = HRVHistory.rmssd().roundToInt()
+    val step = readings["Step Counter"]?.let { arr ->
+        // Use session steps if we stored them at index 1 (MainActivity does this)
+        (arr.getOrNull(1) ?: arr.getOrNull(0) ?: 0f).roundToInt()
+    } ?: 0
+    return DayMetrics(hrNow = hr, hrvNow = hrv, stepsToday = step)
 }
