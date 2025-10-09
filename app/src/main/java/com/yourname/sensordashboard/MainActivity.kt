@@ -358,7 +358,7 @@ private fun PagerRoot(
             when (page) {
                 0 -> Dashboard(availableSensors, readings)
                 1 -> CoherenceGlyphPage(readings)
-                else -> CompassPage(readings)
+                2 -> CompassPage(readings)
 }
         }
         Row(
