@@ -1,5 +1,10 @@
 package com.yourname.sensordashboard
 
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
+import java.time.LocalDate
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -39,6 +44,24 @@ import androidx.wear.compose.material.Text
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.*
+
+// Public, tiny daily snapshot used by helpers (HR bpm, RMSSD ms, steps)
+data class DayMetrics(
+    val hrNow: Int,
+    val hrvNow: Int,
+    val stepsToday: Int
+)
+
+// Make or keep this PRIVATE so it doesn't "expose" DayMetrics publicly
+private fun readingsToDayMetrics(readings: Map<String, FloatArray>): DayMetrics {
+    val hr = readings["Heart Rate"]?.getOrNull(0)?.roundToInt() ?: 0
+    val hrv = HRVHistory.rmssd().roundToInt()
+    // session steps = Step Counter [1] (we stored raw at [0], session at [1])
+    val steps = readings["Step Counter"]?.getOrNull(1)?.roundToInt() ?: 0
+    return DayMetrics(hrNow = hr, hrvNow = hrv, stepsToday = steps)
+}
+
+// If you have any other DayMetrics helpers that were 'fun ...', mark them 'private fun ...'
 
 /* ================= GLOBAL SIGNAL BUS / SCALERS ================= */
 
@@ -229,7 +252,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
 /* ================= HRV HISTORY (compressed + smoothed) ================= */
 
-private object HRVHistory {
+object HRVHistory {
     private val rrIntervals = mutableStateListOf<Float>() // ms
     private var lastBeatMs: Long? = null
 
@@ -266,7 +289,7 @@ private object HRVHistory {
     }
 }
 
-private object HRVSmoother {
+object HRVSmoother {
     private var last = 0f
     fun filter(v: Float, alpha: Float = 0.15f): Float {
         last += alpha * (v - last)
@@ -274,9 +297,10 @@ private object HRVSmoother {
     }
 }
 
+
 /* ================= HISTORY BUFFERS ================= */
 
-private object SensorHistory {
+object SensorHistory {
     val gyroX = mutableStateListOf<Float>()
     val gyroY = mutableStateListOf<Float>()
     val gyroZ = mutableStateListOf<Float>()
@@ -323,7 +347,7 @@ private fun PagerRoot(
     availableSensors: List<String>,
     readings: Map<String, FloatArray>
 ) {
-    val pagerState = rememberPagerState(pageCount = { 2 })
+    val pagerState = rememberPagerState(pageCount = { 3 })
     Column(Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
@@ -334,8 +358,9 @@ private fun PagerRoot(
         ) { page ->
             when (page) {
                 0 -> Dashboard(availableSensors, readings)
-                else -> CoherenceGlyphPage(readings)
-            }
+                1 -> CoherenceGlyphPage(readings)
+                2 -> CompassPage()
+}
         }
         Row(
             Modifier
@@ -346,6 +371,8 @@ private fun PagerRoot(
             Dot(active = pagerState.currentPage == 0)
             Spacer(Modifier.width(6.dp))
             Dot(active = pagerState.currentPage == 1)
+            Spacer(Modifier.width(6.dp))
+            Dot(active = pagerState.currentPage == 2)
         }
     }
 }
@@ -389,7 +416,7 @@ private fun Dashboard(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(10.dp)
+            .padding(12.dp)
             .verticalScroll(rememberScrollState())
     ) {
         Text(
@@ -999,6 +1026,34 @@ private fun MicrogridParallax() {
             y += spacing
         }
     }
+}
+
+@Composable
+private fun Pill(text: String, active: Boolean = true, onClick: (() -> Unit)? = null) {
+    Box(
+        Modifier.clip(RoundedCornerShape(999.dp))
+            .background(if (active) Color(0x22,0xFF,0xFF) else Color(0x11,0xFF,0xFF))
+            .clickable(enabled = onClick != null) { onClick?.invoke() }
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) { Text(text, fontSize = 12.sp) }
+}
+
+@Composable
+private fun SmallField(label: String, value: String, onChange: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(label, fontSize = 11.sp, color = Color(0x99,0xFF,0xFF))
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0x14,0xFF,0xFF))
+                .padding(6.dp),
+            textStyle = MaterialTheme.typography.body2.copy(fontSize = 12.sp)
+        )
+    }
+    Spacer(Modifier.height(6.dp))
 }
 
 /* ================= UTILITIES ================= */
