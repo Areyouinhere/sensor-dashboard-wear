@@ -47,7 +47,7 @@ val orientationDegState = mutableStateOf(floatArrayOf(0f, 0f, 0f))
 val stepBaselineState   = mutableStateOf<Float?>(null) // shared steps baseline
 
 private val lightScale = AutoScaler(decay = 0.997f, floor = 0.1f, ceil = 40_000f)
-private val magScale   = AutoScaler(decay = 0.995f, floor = 5f,   ceil = 150f)
+val magScale   = AutoScaler(decay = 0.995f, floor = 5f,   ceil = 150f)
 
 /** Shared math + formatting helpers (top-level & public so other files can use them) */
 fun magnitude(v: FloatArray): Float = sqrt(v.fold(0f) { s, x -> s + x*x })
@@ -295,7 +295,7 @@ private object HRVSmoother {
 
 /* ================= HISTORIES ================= */
 
-private object SensorHistory {
+object SensorHistory {
     val gyroX = mutableStateListOf<Float>()
     val gyroY = mutableStateListOf<Float>()
     val gyroZ = mutableStateListOf<Float>()
