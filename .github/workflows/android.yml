@@ -3,12 +3,6 @@ name: Build Wear APK
 on:
   push:
     branches: [ main, master ]
-        paths:
-      - 'app/**'
-      - 'gradle/**'
-      - 'build.gradle*'
-      - 'settings.gradle*'
-      - '.github/workflows/**'
   pull_request:
 
 jobs:
