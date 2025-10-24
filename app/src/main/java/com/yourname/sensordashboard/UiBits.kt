@@ -243,7 +243,7 @@ fun SensorCard(name: String, values: FloatArray, onResetSteps: () -> Unit) {
     LiveValuesLine(values)
     Box(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-            .background(Color(0x10, 0xFF, 0xFF)).padding(8.dp)
+            .background(UiSettings.bubbleBgColor)).padding(8.dp)
     ) {
         when (name) {
             "Gyroscope" -> GyroWaveform(SensorHistory.gyroX, SensorHistory.gyroY, SensorHistory.gyroZ)
