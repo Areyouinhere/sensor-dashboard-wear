@@ -213,14 +213,15 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         Spacer(Modifier.height(10.dp))
 
         // Next Steps (simple rule-based hints; zero-cost, uses existing signals)
-        val tips = buildList {
+        // --- Next Steps (replace your existing tips block with this) ---
+        val tipsBase = buildList {
             if (recovery < 0.45f) add("Keep it easy: prioritize sleep & light activity.")
             if (hrCentered < 0.5f) add("HR drifting: try 5–7 min nasal breathing / easy walk.")
             if (motionStability < 0.55f) add("High jitter: add short balance/mobility (1–2 sets).")
             if (movement < 0.25f) add("Low movement: take a 10–15 min walk to prime.")
             if (envCentered < 0.45f) add("Pressure shift: ease into intensity; hydrate.")
-            if (tips.isEmpty()) add("You’re in a good zone—green light for planned work.")
         }
+        val tips = if (tipsBase.isEmpty()) listOf("You’re in a good zone—green light for planned work.") else tipsBase
 
         Column(
             Modifier
