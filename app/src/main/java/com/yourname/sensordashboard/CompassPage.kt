@@ -21,10 +21,6 @@ import androidx.wear.compose.material.Text
 import kotlin.math.abs
 import kotlin.math.min
 
-/**
- * The Compass page you wanted live.
- * Reads sensor values from MainActivity and displays normalized rings.
- */
 @Composable
 fun CompassPage(readings: Map<String, FloatArray>) {
     val accel = readings["Accelerometer"] ?: floatArrayOf(0f, 0f, 0f)
@@ -96,34 +92,22 @@ fun CompassPage(readings: Map<String, FloatArray>) {
                 val topLeft = Offset(cx - r, cy - r)
                 val sz = Size(d, d)
 
-                // track
                 drawArc(
                     color = Color(0x22, 0xFF, 0xFF),
-                    startAngle = -90f,
-                    sweepAngle = 360f,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = sz,
+                    startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                    topLeft = topLeft, size = sz,
                     style = Stroke(width = 8f, cap = StrokeCap.Round)
                 )
-                // glow
                 drawArc(
                     color = glow,
-                    startAngle = -90f,
-                    sweepAngle = 360f * pct.coerceIn(0f, 1f),
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = sz,
+                    startAngle = -90f, sweepAngle = 360f * pct.coerceIn(0f, 1f), useCenter = false,
+                    topLeft = topLeft, size = sz,
                     style = Stroke(width = 10f, cap = StrokeCap.Round)
                 )
-                // core
                 drawArc(
                     color = core,
-                    startAngle = -90f,
-                    sweepAngle = (360f * pct).coerceAtLeast(6f),
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = sz,
+                    startAngle = -90f, sweepAngle = (360f * pct).coerceAtLeast(6f), useCenter = false,
+                    topLeft = topLeft, size = sz,
                     style = Stroke(width = 5f, cap = StrokeCap.Round)
                 )
             }
