@@ -2,7 +2,7 @@ name: Build Wear APK
 
 on:
   push:
-    branches: [ main, master, feature/compass-pagev3 ]
+    branches: [ main, master, stable-v3.1 ]
   pull_request:
     branches:
       - main
