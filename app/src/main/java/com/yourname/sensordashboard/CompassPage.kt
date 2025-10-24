@@ -20,20 +20,8 @@ import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Text
 import kotlin.math.abs
 import kotlin.math.min
+import com.yourname.sensordashboard.DividerLine
 
-/**
- * Public, reusable divider so other files can call it.
- */
-@Composable
-fun DividerLine() {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(1.dp)
-            .clip(RoundedCornerShape(0.dp))
-            .background(Color(0x22, 0xFF, 0xFF))
-    )
-}
 
 /**
  * The Compass page you wanted live (not the “coming soon” stub).
