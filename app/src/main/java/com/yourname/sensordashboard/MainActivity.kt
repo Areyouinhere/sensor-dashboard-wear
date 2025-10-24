@@ -309,7 +309,7 @@ object SensorHistory {
     fun pushGrav(m: Float)  = push(grav, m)
 }
 
-private class AutoScaler(
+class AutoScaler(
     private val decay: Float = 0.995f,
     private val floor: Float = 0.1f,
     private val ceil: Float = 100f
