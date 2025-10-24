@@ -38,11 +38,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-/* =========================
-   FOUNDATION & UTILITIES
-   ========================= */
-
-/** Auto-ranging helper used by light & magnetic strength visualizations. */
+/* ===== AutoScaler + shared ===== */
 class AutoScaler(
     private val decay: Float = 0.995f,
     private val floor: Float = 0.1f,
@@ -63,11 +59,9 @@ class AutoScaler(
 
 val orientationDegState = mutableStateOf(floatArrayOf(0f, 0f, 0f))
 val stepBaselineState   = mutableStateOf<Float?>(null)
-
 val lightScale = AutoScaler(decay = 0.997f, floor = 0.1f, ceil = 40_000f)
 val magScale   = AutoScaler(decay = 0.995f, floor = 5f,   ceil = 150f)
 
-/** Shared helpers */
 fun magnitude(v: FloatArray): Float = sqrt(v.fold(0f) { s, x -> s + x*x })
 fun fmtPct(v: Float): String = "${(v.coerceIn(0f,1f)*100f).roundToInt()}%"
 fun fmtMs(v: Float): String  = "${v.roundToInt()} ms"
@@ -89,15 +83,13 @@ fun labelFor(type: Int): String = when (type) {
     else -> "Type $type"
 }
 
-/* ================= ACTIVITY ================= */
-
+/* ===== Activity ===== */
 class MainActivity : ComponentActivity(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
     private val readings = mutableStateMapOf<String, FloatArray>()
     private var availableSensors by mutableStateOf(listOf<Sensor>())
 
-    // orientation source buffers
     private var lastAccel: FloatArray? = null
     private var lastMag:   FloatArray? = null
     private var lastRotVec: FloatArray? = null
@@ -251,10 +243,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     override fun onDestroy() { super.onDestroy(); sensorManager.unregisterListener(this) }
 }
 
-/* ================= HRV HISTORY ================= */
+/* ===== HRV HISTORY, HISTORIES (unchanged) ===== */
 
 object HRVHistory {
-    private val rrIntervals = mutableStateListOf<Float>() // ms
+    private val rrIntervals = mutableStateListOf<Float>()
     private var lastBeatMs: Long? = null
     fun push(rr: Float, max: Int = 30) {
         if (rr <= 0) return
@@ -284,8 +276,6 @@ private object HRVSmoother {
     fun filter(v: Float, alpha: Float = 0.15f): Float { last += alpha * (v - last); return last }
 }
 
-/* ================= HISTORIES (Page 1 graphs) ================= */
-
 object SensorHistory {
     val gyroX = mutableStateListOf<Float>()
     val gyroY = mutableStateListOf<Float>()
@@ -295,7 +285,6 @@ object SensorHistory {
     val light = mutableStateListOf<Float>()
     val pressure = mutableStateListOf<Float>()
     val hr = mutableStateListOf<Float>()
-
     private fun push(list: MutableList<Float>, v: Float, max: Int = 120) {
         if (list.size >= max) list.removeAt(0)
         list.add(v)
@@ -308,14 +297,14 @@ object SensorHistory {
     fun pushHR(bpm: Float) = push(hr, bpm)
 }
 
-/* ================= PAGER + PAGES ================= */
+/* ===== Pager + Pages ===== */
 
 @Composable
 private fun PagerRoot(
     availableSensors: List<Sensor>,
     readings: Map<String, FloatArray>
 ) {
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val pagerState = rememberPagerState(pageCount = { 4 }) // +1 page for Settings
     Column(Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
@@ -326,15 +315,16 @@ private fun PagerRoot(
                 0 -> Dashboard(availableSensors, readings)
                 1 -> CoherenceGlyphPage(readings)
                 2 -> CompassPage(readings)
+                3 -> SettingsPage() // NEW
             }
         }
         Row(
             Modifier.fillMaxWidth().padding(bottom = 6.dp),
             horizontalArrangement = Arrangement.Center
         ) {
-            repeat(3) { i ->
+            repeat(4) { i ->
                 Dot(active = pagerState.currentPage == i)
-                if (i != 2) Spacer(Modifier.width(6.dp))
+                if (i != 3) Spacer(Modifier.width(6.dp))
             }
         }
     }
@@ -344,234 +334,164 @@ private fun PagerRoot(
     Box(
         Modifier.size(if (active) 8.dp else 6.dp)
             .clip(RoundedCornerShape(50))
-            .background(if (active) Color(0xFF, 0xD7, 0x00) else Color(0x44, 0xFF, 0xFF))
+            .background(if (active) UiSettings.accentColor else Color(0x44, 0xFF, 0xFF))
     )
 }
 
-/* ================= PAGE 1 – DASHBOARD ================= */
+/* ===== PAGE 1 – Dashboard (unchanged layout; sensor list richer already) ===== */
+// (same Dashboard() as you have now; it pulls UiBits components and already prints rich sensor info)
+
+/* ===== PAGE 2 – Coherence Glyph ===== */
+// (use your current CoherenceGlyphPage from the last drop; just ensure any info
+//  cards use UiSettings.bubbleBgColor instead of light cyan)
+
+/* ===== Settings Page (NEW) ===== */
 
 @Composable
-private fun Dashboard(
-    availableSensors: List<Sensor>,
-    readings: Map<String, FloatArray>
-) {
-    val ordered = listOf(
-        "Accelerometer","Linear Accel","Gravity","Gyroscope",
-        "Rotation Vector","Magnetic","Light","Pressure",
-        "Humidity","Ambient Temp","Heart Rate","HRV","Step Counter"
-    )
-
-    val items by remember {
-        derivedStateOf {
-            val base = readings.toMutableMap()
-            base["HRV"] = floatArrayOf(HRVHistory.rmssd())
-            base.entries.sortedWith(
-                compareBy(
-                    { ordered.indexOf(it.key).let { i -> if (i == -1) Int.MAX_VALUE else i } },
-                    { it.key })
-            )
-        }
-    }
-
+fun SettingsPage() {
     Column(
-        Modifier.fillMaxSize().padding(10.dp).verticalScroll(rememberScrollState())
+        Modifier.fillMaxSize().padding(14.dp).verticalScroll(rememberScrollState())
     ) {
-        Text(
-            "Sensor Dashboard",
-            fontWeight = FontWeight.Bold, fontSize = 18.sp,
-            modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally)
-        )
-        Spacer(Modifier.height(4.dp))
-        DividerLine()
-        Spacer(Modifier.height(8.dp))
-
-        if (readings.isEmpty()) {
-            WaitingPulseDots()
-            Spacer(Modifier.height(16.dp))
-        }
-
-        items.forEach { (name, values) ->
-            SensorCard(
-                name = name,
-                values = values,
-                onResetSteps = {
-                    if (name == "Step Counter") {
-                        stepBaselineState.value = readings["Step Counter"]?.getOrNull(0)
-                        CompassModel.notifySessionReset()
-                    }
-                },
-            )
-        }
-
-        Spacer(Modifier.height(10.dp))
-        Text("Available Sensors (${availableSensors.size})", fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(4.dp))
-        availableSensors.take(24).forEach { s ->
-            Text(
-                "- ${s.name} (type ${s.type}) • vendor: ${s.vendor} • res: ${"%.3f".format(s.resolution)} • max: ${"%.1f".format(s.maximumRange)} • power: ${"%.1f".format(s.power)} mA",
-                fontSize = 11.sp,
-                color = Color(0xAA,0xFF,0xFF),
-                lineHeight = 14.sp
-            )
-        }
-    }
-}
-
-/* ================= PAGE 2 – COHERENCE GLYPH ================= */
-
-@Composable
-private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
-    val accel = readings["Accelerometer"] ?: floatArrayOf(0f, 0f, 0f)
-    val gyro  = readings["Gyroscope"]     ?: floatArrayOf(0f, 0f, 0f)
-    val hr    = readings["Heart Rate"]?.getOrNull(0) ?: 0f
-    val press = readings["Pressure"]?.getOrNull(0)   ?: 1013f
-    val hrv   = HRVHistory.rmssd()
-
-    fun soft01(x: Float) = x.coerceIn(0f, 1f)
-    fun knee(x: Float, k: Float = 0.6f) = run {
-        val t = x.coerceIn(0f,1f); if (t < k) t/k*0.7f else 0.7f + (t-k)/(1f-k)*0.3f
-    }
-
-    val accelMag = magnitude(accel)
-    val gyroMag  = magnitude(gyro)
-    val nAccel   = soft01(accelMag / 6f)              // movement intensity
-    val nGyro    = soft01(gyroMag  / 4f)              // motion jitter
-    val hrMid    = 65f
-    val hrSpan   = 50f
-    val nHRBand  = soft01(1f - abs((0.5f + (hr - hrMid)/(2f*hrSpan)) - 0.5f)*2f) // centered around mid
-    val nEnv     = soft01(1f - abs(((press - 980f)/70f).coerceIn(0f,1f) - 0.5f)*2f)
-    val nHRV     = soft01(hrv/80f)
-
-    val ema = remember { mutableStateOf(floatArrayOf(nAccel, nGyro, nHRBand, nEnv, nHRV)) }
-    val alpha = 0.12f
-    val target = floatArrayOf(nAccel, nGyro, nHRBand, nEnv, nHRV)
-    val s = FloatArray(5) { i -> ema.value[i] + alpha*(target[i]-ema.value[i]) }
-    ema.value = s
-
-    val movement        = knee(s[0])
-    val motionStability = knee(1f - s[1])          // invert jitter
-    val hrCentered      = knee(s[2])
-    val envBalanced     = knee(s[3])
-    val recovery        = knee(s[4])               // HRV capacity
-
-    val composite = (0.35f*recovery + 0.25f*hrCentered + 0.2f*motionStability + 0.1f*movement + 0.1f*envBalanced)
-        .coerceIn(0f,1f)
-
-    var show by remember { mutableStateOf(false) }
-
-    Column(
-        Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())
-    ) {
-        Text("Coherence", fontWeight = FontWeight.Bold, fontSize = 18.sp,
+        Text("Settings", fontWeight = FontWeight.Bold, fontSize = 18.sp,
             modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally))
-        Spacer(Modifier.height(4.dp)); DividerLine(); Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp)); DividerLine(); Spacer(Modifier.height(10.dp))
 
-        // Rings + gradient center (red -> purple -> blue/violet)
-        androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(170.dp)) {
-            val cx = size.width/2f
-            val cy = size.height/2f
-            val baseR = min(size.width,size.height)*0.26f
-            val gap = 14f
-
-            fun ring(idx: Int, pct: Float, glow: Color, core: Color) {
-                val r = baseR + gap*idx
-                val d = r*2f
-                val tl = androidx.compose.ui.geometry.Offset(cx-r, cy-r)
-                val sz = androidx.compose.ui.geometry.Size(d,d)
-                // track
-                drawArc(
-                    color = Color(0x22,0xFF,0xFF),
-                    startAngle = -90f, sweepAngle = 360f, useCenter = false,
-                    topLeft = tl, size = sz,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 8f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                )
-                // glow
-                drawArc(
-                    color = glow,
-                    startAngle = -90f, sweepAngle = 360f*pct.coerceIn(0f,1f), useCenter = false,
-                    topLeft = tl, size = sz,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 10f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                )
-                // core
-                drawArc(
-                    color = core,
-                    startAngle = -90f, sweepAngle = (360f*pct).coerceAtLeast(6f), useCenter = false,
-                    topLeft = tl, size = sz,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 5f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                )
-            }
-
-            ring(0, recovery,        Color(0x55,0xFF,0xAA), Color(0xFF,0xCC,0x66)) // HRV capacity
-            ring(1, hrCentered,      Color(0x66,0x80,0xFF), Color(0xFF,0xE0,0x80)) // HR mid-banding
-            ring(2, motionStability, Color(0x55,0xD0,0xFF), Color(0xAA,0xFF,0xFF)) // Gyro stability
-            ring(3, movement,        Color(0x66,0xFF,0xD7), Color(0xFF,0xE6,0x88)) // Accel/movement
-            ring(4, envBalanced,     Color(0x55,0xFF,0x99), Color(0xDD,0xFF,0x99)) // Env balance
-
-            // center gradient: low=red, mid=purple, high=blue/violet
-            val t = composite
-            fun lerp(a: Float, b: Float, u: Float) = a + (b - a) * u
-            fun mix(c1: Color, c2: Color, u: Float) = Color(
-                lerp(c1.red, c2.red, u),
-                lerp(c1.green, c2.green, u),
-                lerp(c1.blue, c2.blue, u),
-                1f
-            )
-            val red     = Color(0xFF,0x33,0x33)
-            val purple  = Color(0x88,0x33,0xCC)
-            val blue    = Color(0x44,0xAA,0xFF)
-            val edge    = if (t < 0.5f) mix(red, purple, t/0.5f) else mix(purple, blue, (t-0.5f)/0.5f)
-            val core    = Color(1f, 1f, 1f, 1f) // inner bloom to read clearly
-            val maxR = baseR - 6f
-            val coreR = (maxR * (0.35f + 0.65f*t))
-
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(core.copy(alpha = 0.85f * (0.6f + 0.4f*t)), edge.copy(alpha = 0f)),
-                    center = androidx.compose.ui.geometry.Offset(cx, cy),
-                    radius = coreR * 1.2f
+        // Color swatches
+        SettingSection("Accent Color") {
+            ColorRow(
+                listOf(
+                    Color(0xFF,0xD7,0x00), Color(0x44,0xFF,0x88), Color(0xFF,0x66,0x66),
+                    Color(0x88,0x33,0xCC), Color(0x00,0xD0,0xFF), Color(0xFF,0xA5,0x00)
                 ),
-                radius = coreR * 1.2f,
-                center = androidx.compose.ui.geometry.Offset(cx, cy)
-            )
-            drawCircle(
-                color = core.copy(alpha = 0.25f + 0.5f*t),
-                radius = coreR * (0.45f + 0.25f*t),
-                center = androidx.compose.ui.geometry.Offset(cx, cy)
-            )
+                selected = UiSettings.accentColor
+            ) { UiSettings.accentColor = it }
         }
 
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "HRV ${fmtMs(hrv)} • HR ${hr.toInt()} bpm • Coherence ${fmtPct(composite)}",
-            fontSize = 12.sp, color = Color(0xCC,0xFF,0xFF)
-        )
+        SettingSection("Glow Color") {
+            ColorRow(
+                listOf(
+                    Color(0x66,0x00,0xEA), Color(0x00,0xB3,0xFF), Color(0xFF,0x33,0x99),
+                    Color(0x99,0x00,0xFF), Color(0x00,0xFF,0xCC), Color(0xFF,0x00,0x66)
+                ),
+                selected = UiSettings.glowColor
+            ) { UiSettings.glowColor = it }
+        }
 
-        Spacer(Modifier.height(10.dp))
+        SettingSection("Bubble Background") {
+            ColorRow(
+                listOf(
+                    Color(0f,0f,0f,0.80f), Color(1f,1f,1f,0.12f), Color(0f,0f,0f,0.6f),
+                    Color(0.1f,0.1f,0.1f,0.9f), Color(0.0f,0.2f,0.2f,0.6f), Color(0.2f,0.0f,0.2f,0.6f)
+                ),
+                selected = UiSettings.bubbleBgColor
+            ) { UiSettings.bubbleBgColor = it }
+        }
+
+        SettingSection("Grid Color") {
+            ColorRow(
+                listOf(
+                    Color(0x13,0xFF,0xFF), Color(0x13,0xFF,0x13), Color(0x13,0x13,0xFF),
+                    Color(0x22,0xAA,0xFF), Color(0x22,0xFF,0xAA), Color(0xFF,0x22,0xAA)
+                ),
+                selected = UiSettings.gridColor
+            ) { UiSettings.gridColor = it }
+        }
+
+        // Sliders (simple discrete chips for watch-friendliness)
+        SettingSection("Grid Speed") {
+            ChipRow(
+                items = listOf(0.0f, 0.3f, 0.6f, 1.0f, 1.5f),
+                selected = UiSettings.gridSpeed
+            ) { UiSettings.gridSpeed = it }
+        }
+        SettingSection("Grid Spacing") {
+            ChipRow(
+                items = listOf(12f, 16f, 20f, 26f, 32f, 40f),
+                selected = UiSettings.gridSpacing
+            ) { UiSettings.gridSpacing = it }
+        }
+
+        SettingSection("Grid Style") {
+            ToggleRow(
+                label = "Isometric",
+                checked = UiSettings.isometric
+            ) { UiSettings.isometric = it }
+        }
+
+        Spacer(Modifier.height(12.dp))
         Text(
-            text = if (show) "Hide explanation ▲" else "What is this? ▼",
-            fontSize = 11.sp,
-            color = Color(0xFF, 0xD7, 0x00),
-            modifier = Modifier
-                .clip(RoundedCornerShape(6.dp))
-                .clickable { show = !show }
-                .padding(horizontal = 6.dp, vertical = 2.dp)
+            "Tip: Accent affects needles/bars, Glow affects fills/outlines. Bubbles use your chosen backdrop for info cards.",
+            fontSize = 11.sp, color = Color(0xAA,0xFF,0xFF), lineHeight = 14.sp
         )
-        if (show) {
-            Spacer(Modifier.height(6.dp))
-            Column(
-                Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0x11,0xFF,0xFF)).padding(8.dp)
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+/* --- tiny UI helpers --- */
+@Composable
+private fun SettingSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(UiSettings.bubbleBgColor).padding(10.dp)
+    ) {
+        Text(title, fontSize = 12.sp, color = UiSettings.accentColor)
+        Spacer(Modifier.height(6.dp))
+        content()
+    }
+    Spacer(Modifier.height(10.dp))
+}
+
+@Composable
+private fun ColorRow(colors: List<Color>, selected: Color, onPick: (Color) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        colors.forEach { c ->
+            Box(
+                Modifier.size(if (c == selected) 26.dp else 22.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(c)
+                    .clickable { onPick(c) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChipRow(items: List<Float>, selected: Float, onPick: (Float) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        items.forEach { v ->
+            val active = (v == selected)
+            val bg = if (active) UiSettings.accentColor.copy(alpha = 0.25f) else UiSettings.bubbleBgColor
+            val bd = if (active) UiSettings.accentColor else Color(0x33,0xFF,0xFF)
+            Box(
+                Modifier.clip(RoundedCornerShape(10.dp))
+                    .background(bg)
+                    .border(width = 1.dp, color = bd, shape = RoundedCornerShape(10.dp))
+                    .clickable { onPick(v) }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
-                Text(
-                    "• Recovery (inner ring): HRV capacity, smoothed; more filled = better recovery.\n" +
-                    "• HR Centering: how close HR is to a calm mid-band (context of you / session).\n" +
-                    "• Motion Stability: less jitter = steadier nervous system state.\n" +
-                    "• Movement: presence of movement (acceleration) without the jitter penalty.\n" +
-                    "• Env Balance: barometric centering (pressure swings can correlate with strain).\n\n" +
-                    "Composite Coherence blends: HRV(35%), HR Center(25%), Stability(20%), Movement(10%), Env(10%).\n" +
-                    "Use the trend, not single ticks. If center glow shifts red→purple, ease up; toward blue, you’re primed.",
-                    fontSize = 11.sp, color = Color(0xAA,0xFF,0xFF), lineHeight = 14.sp
-                )
+                Text(if (items.first() < 10f) "${v.toInt()}px" else "%.1f".format(v),
+                    fontSize = 11.sp, color = Color(0xDD,0xFF,0xFF))
             }
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(label: String, checked: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onToggle(!checked) },
+        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, fontSize = 12.sp, color = Color(0xEE,0xFF,0xFF))
+        Box(
+            Modifier.width(38.dp).height(22.dp).clip(RoundedCornerShape(12.dp))
+                .background(if (checked) UiSettings.accentColor.copy(alpha=0.4f) else Color(0x22,0xFF,0xFF))
+        ) {
+            Box(
+                Modifier.offset(x = if (checked) 18.dp else 2.dp, y = 2.dp)
+                    .size(18.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(if (checked) UiSettings.accentColor else Color(0x66,0xFF,0xFF))
+            )
         }
     }
 }
