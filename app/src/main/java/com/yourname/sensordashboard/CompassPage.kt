@@ -136,7 +136,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         Spacer(Modifier.height(10.dp))
 
         // Sub-signal tiles (reuse tiny visuals)
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0x10,0xFF,0xFF)).padding(10.dp)) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(UiSettings.bubbleBgColor)).padding(10.dp)) {
             Text("Signals", fontSize = 12.sp, color = Color(0xEE,0xFF,0xFF))
             Spacer(Modifier.height(6.dp))
             Text("Recovery (HRV capacity) ${fmtPct(recovery)}", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
@@ -158,7 +158,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         Spacer(Modifier.height(10.dp))
 
         // Steps tile
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0x10,0xFF,0xFF)).padding(10.dp)) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(UiSettings.bubbleBgColor)).padding(10.dp)) {
             Text("Today’s Steps", fontSize = 12.sp, color = Color(0xEE,0xFF,0xFF))
             Spacer(Modifier.height(4.dp))
             val norm = (stepsSession / 12_000f).coerceIn(0f,1f)
@@ -180,7 +180,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         }
         val tips = if (tipsBase.isEmpty()) listOf("You’re in a good zone — green light for planned work.") else tipsBase
 
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0x12,0xFF,0xFF)).padding(10.dp)) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(UiSettings.bubbleBgColor)).padding(10.dp)) {
             Text("Next Steps", fontSize = 12.sp, color = Color(0xFF,0xD7,0x00))
             Spacer(Modifier.height(6.dp))
             tips.forEach { line -> Text("• $line", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF)) }
