@@ -17,8 +17,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Text
 import kotlinx.coroutines.delay
@@ -48,7 +48,7 @@ fun WaitingPulseDots() {
     Text("Listening" + ".".repeat(dots), fontSize = 12.sp, color = Color.Gray.copy(alpha = alpha.value))
 }
 
-/* ==== Core atoms ==== */
+/* ==== Core atoms (use UiSettings colors) ==== */
 @Composable
 fun NeonHeatBar(name: String, values: FloatArray) {
     val mag = magnitude(values)
@@ -75,7 +75,9 @@ fun NeonHeatBar(name: String, values: FloatArray) {
 fun NeonHeatBarNormalized(norm: Float) {
     val anim = remember { Animatable(0f) }
     LaunchedEffect(norm) { anim.animateTo(norm.coerceIn(0f, 1f), tween(220)) }
-    val track = Color(0x33,0xFF,0xFF); val glow = Color(0x66,0x00,0xEA); val core = Color(0xFF,0xD7,0x00)
+    val track = Color(0x33,0xFF,0xFF)
+    val glow = UiSettings.glowColor
+    val core = UiSettings.accentColor
     Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(track)) {
         Box(Modifier.fillMaxWidth(anim.value).height(10.dp).background(glow.copy(alpha = 0.6f)))
         Box(Modifier.fillMaxWidth((anim.value*0.98f).coerceAtLeast(0.02f)).height(6.dp)
@@ -88,7 +90,9 @@ fun CenteredZeroBar(value: Float, visualRange: Float) {
     val clamped = (value / visualRange).coerceIn(-1f, 1f)
     val anim = remember { Animatable(0f) }
     LaunchedEffect(clamped) { anim.animateTo(clamped, tween(220)) }
-    val track = Color(0x22,0xFF,0xFF); val negGlow = Color(0x66,0x00,0xEA); val posGlow = Color(0xFF,0xD7,0x00)
+    val track = Color(0x22,0xFF,0xFF)
+    val negGlow = UiSettings.glowColor
+    val posGlow = UiSettings.accentColor
     Box(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(track)) {
         val half = 0.5f; val amt = abs(anim.value)*half
         Box(Modifier.fillMaxWidth(half + amt).height(14.dp).clip(RoundedCornerShape(7.dp))
@@ -120,12 +124,11 @@ fun GyroWaveform(hx: List<Float>, hy: List<Float>, hz: List<Float>, range: Float
             }
             pass(0.22f,7f); pass(0.35f,4f); pass(1f,2f)
         }
-        val gold = Color(0xFF,0xD7,0x00); val violet = Color(0x66,0x00,0xEA); val cyan = Color(0x00,0xD0,0xFF)
+        val gold = UiSettings.accentColor; val violet = UiSettings.glowColor; val cyan = Color(0x00,0xD0,0xFF)
         drawSeries(hx, gold); drawSeries(hy, violet); drawSeries(hz, cyan)
     }
 }
 
-/** Simple sparkline for monotonic-ish ranges (light, pressure (after transform), HR) */
 @Composable
 fun Sparkline(normSeries: List<Float>) {
     Canvas(Modifier.fillMaxWidth().height(44.dp)) {
@@ -138,8 +141,8 @@ fun Sparkline(normSeries: List<Float>) {
         for (i in 1 until normSeries.size) {
             val y = h*(1f - normSeries[i].coerceIn(0f,1f))
             val x = step*i
-            drawLine(Color(0xFF,0xD7,0x00).copy(alpha=0.35f), prev, Offset(x,y), 6f)
-            drawLine(Color(0xFF,0xD7,0x00), prev, Offset(x,y), 2f)
+            drawLine(UiSettings.accentColor.copy(alpha=0.35f), prev, Offset(x,y), 6f)
+            drawLine(UiSettings.accentColor, prev, Offset(x,y), 2f)
             prev = Offset(x,y)
         }
     }
@@ -150,7 +153,7 @@ fun Sparkline(normSeries: List<Float>) {
 fun GravityTuner(values: FloatArray) {
     val g = magnitude(values)
     val center = 9.81f
-    val span = 0.30f // ±0.15g window
+    val span = 0.30f
     val norm = ((g - (center - span/2f)) / span).coerceIn(0f, 1f)
     Canvas(Modifier.fillMaxWidth().height(54.dp)) {
         val w = size.width; val h = size.height
@@ -166,7 +169,7 @@ fun GravityTuner(values: FloatArray) {
         val rad = ang * (PI/180f).toFloat()
         val nx = cx + cos(rad)*r
         val ny = cy + sin(rad)*r
-        drawLine(Color(0xFF,0xD7,0x00), Offset(cx,cy), Offset(nx,ny), 4f)
+        drawLine(UiSettings.accentColor, Offset(cx,cy), Offset(nx,ny), 4f)
     }
 }
 
@@ -183,8 +186,8 @@ fun GravityTuner(values: FloatArray) {
         val w = size.width; val h = size.height
         val cx = w/2f; val cy = h/2f
         val r  = min(w,h) * 0.18f * scale.value
-        drawCircle(Color(0x66,0x00,0xEA), radius = r*1.4f, center = Offset(cx, cy))
-        drawCircle(Color(0xFF,0xD7,0x00), radius = r,       center = Offset(cx, cy))
+        drawCircle(UiSettings.glowColor, radius = r*1.4f, center = Offset(cx, cy))
+        drawCircle(UiSettings.accentColor, radius = r,       center = Offset(cx, cy))
     }
 }
 
@@ -205,11 +208,11 @@ fun MagneticDial(heading: Float, strengthNorm: Float) {
         val ang = (- (orientationDegState.value.getOrNull(0) ?: 0f) + 90f) * (PI/180f).toFloat()
         val nx = cx + cos(ang) * r
         val ny = cy - sin(ang) * r
-        drawLine(Color(0xFF,0xD7,0x00), start = Offset(cx, cy), end = Offset(nx, ny), strokeWidth = 4f)
+        drawLine(UiSettings.accentColor, start = Offset(cx, cy), end = Offset(nx, ny), strokeWidth = 4f)
 
         val ir = r * (0.3f + 0.6f * strengthNorm.coerceIn(0f,1f))
         drawArc(
-            color = Color(0x66, 0x00, 0xEA),
+            color = UiSettings.glowColor,
             startAngle = 0f, sweepAngle = 360f, useCenter = false,
             topLeft = Offset(cx - ir, cy - ir), size = Size(ir*2, ir*2),
             style = Stroke(width = 4f, cap = StrokeCap.Round)
@@ -247,7 +250,6 @@ fun SensorCard(name: String, values: FloatArray, onResetSteps: () -> Unit) {
             "Gravity"   -> GravityTuner(values)
 
             "Accelerometer" -> {
-                // accel magnitude sparkline
                 val series = SensorHistory.accel.map { (it / 8f).coerceIn(0f,1f) }
                 Sparkline(series)
             }
@@ -280,7 +282,6 @@ fun SensorCard(name: String, values: FloatArray, onResetSteps: () -> Unit) {
             }
 
             "Pressure" -> {
-                // deviation from ~1013hPa
                 val dev = (values.getOrNull(0) ?: 1013f) - 1013f
                 CenteredZeroBar(dev, visualRange = 25f)
             }
@@ -322,7 +323,7 @@ fun RotationPseudo3D(x: Float, y: Float, z: Float) {
         val w = size.width; val h = size.height
         val cx = w/2f; val cy = h/2f
         val rw = w*0.6f; val rh = h*0.5f
-        val base = Color(0x22,0xFF,0xFF); val core = Color(0xFF,0xD7,0x00)
+        val base = Color(0x22,0xFF,0xFF); val core = UiSettings.accentColor
         val dx = tiltX*10f; val dy = tiltY*8f
         val left = cx - rw/2f; val right = cx + rw/2f; val top = cy - rh/2f; val bottom = cy + rh/2f
         val p1 = Offset(left-dx, top+dy); val p2 = Offset(right-dx, top-dy)
@@ -341,11 +342,26 @@ fun RotationPseudo3D(x: Float, y: Float, z: Float) {
 @Composable
 fun MicrogridParallax() {
     var phase by remember { mutableStateOf(0f) }
-    LaunchedEffect(Unit) { while (true) { delay(24L); phase = (phase + 0.6f) % 20f } }
+    LaunchedEffect(UiSettings.gridSpeed) { while (true) { delay(24L); phase = (phase + UiSettings.gridSpeed) % UiSettings.gridSpacing } }
     Canvas(Modifier.fillMaxSize()) {
-        val spacing = 20f; val w = size.width; val h = size.height
-        val line = Color(0x13,0xFF,0xFF)
-        var x = -phase; while (x < w) { drawLine(line, Offset(x,0f), Offset(x,h), 1f); x += spacing }
-        var y = -phase; while (y < h) { drawLine(line, Offset(0f,y), Offset(w,y), 1f); y += spacing }
+        val spacing = UiSettings.gridSpacing
+        val w = size.width; val h = size.height
+        val line = UiSettings.gridColor
+
+        if (!UiSettings.isometric) {
+            var x = -phase; while (x < w) { drawLine(line, Offset(x,0f), Offset(x,h), 1f); x += spacing }
+            var y = -phase; while (y < h) { drawLine(line, Offset(0f,y), Offset(w,y), 1f); y += spacing }
+        } else {
+            // isometric: two diagonal families
+            val diag = spacing
+            var d = -phase
+            while (d < w + h) {
+                // 45° /
+                drawLine(line, Offset(d, 0f), Offset(0f, d), 1f)
+                // 135° \
+                drawLine(line, Offset(w - d, 0f), Offset(w, d), 1f)
+                d += diag
+            }
+        }
     }
 }
