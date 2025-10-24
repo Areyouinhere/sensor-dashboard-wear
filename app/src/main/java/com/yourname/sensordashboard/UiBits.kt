@@ -3,14 +3,13 @@ package com.yourname.sensordashboard
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
-import androidx.compose.ui.Alignment
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -23,14 +22,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Text
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.ln
 import kotlin.math.min
 import kotlin.math.sin
-
-/* ==== Shared UI atoms ==== */
 
 @Composable
 fun DividerLine() {
@@ -44,15 +42,7 @@ fun DividerLine() {
 }
 
 @Composable
-fun ThinDivider() {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(1.dp)
-            .clip(RoundedCornerShape(0.dp))
-            .background(Color(0x22, 0xFF, 0xFF))
-    )
-}
+fun ThinDivider() { DividerLine() }
 
 @Composable
 fun HeartPulse(bpm: Float) {
@@ -80,38 +70,28 @@ fun MagneticDial(heading: Float, strengthNorm: Float) {
         val cx = w/2f; val cy = h/2f
         val r = min(w, h) * 0.42f
 
-        // outer ring
         drawArc(
             color = Color(0x22, 0xFF, 0xFF),
-            startAngle = 0f,
-            sweepAngle = 360f,
-            useCenter = false,
-            topLeft = Offset(cx - r, cy - r),
-            size = Size(r*2, r*2),
+            startAngle = 0f, sweepAngle = 360f, useCenter = false,
+            topLeft = Offset(cx - r, cy - r), size = Size(r*2, r*2),
             style = Stroke(width = 6f, cap = StrokeCap.Round)
         )
 
-        // needle
         val ang = (-heading + 90f) * (PI/180f).toFloat()
         val nx = cx + cos(ang) * r
         val ny = cy - sin(ang) * r
         drawLine(Color(0xFF,0xD7,0x00), start = Offset(cx, cy), end = Offset(nx, ny), strokeWidth = 4f)
 
-        // inner strength ring
         val ir = r * (0.3f + 0.6f * strengthNorm.coerceIn(0f,1f))
         drawArc(
             color = Color(0x66, 0x00, 0xEA),
-            startAngle = 0f,
-            sweepAngle = 360f,
-            useCenter = false,
-            topLeft = Offset(cx - ir, cy - ir),
-            size = Size(ir*2, ir*2),
+            startAngle = 0f, sweepAngle = 360f, useCenter = false,
+            topLeft = Offset(cx - ir, cy - ir), size = Size(ir*2, ir*2),
             style = Stroke(width = 4f, cap = StrokeCap.Round)
         )
     }
 }
 
-/* ==== Loading state ==== */
 @Composable
 fun WaitingPulseDots() {
     var dots by remember { mutableStateOf(0) }
@@ -124,7 +104,6 @@ fun WaitingPulseDots() {
     Text("Listening" + ".".repeat(dots), fontSize = 12.sp, color = Color.Gray.copy(alpha = alpha.value))
 }
 
-/* ==== Bars & waves ==== */
 @Composable
 fun NeonHeatBar(name: String, values: FloatArray) {
     val mag = magnitude(values)
@@ -134,12 +113,12 @@ fun NeonHeatBar(name: String, values: FloatArray) {
         "Gravity"       -> 1.2f
         "Gyroscope"     -> 4f
         "Rotation Vector" -> 1.5f
-        "Light"         -> 800f
+        "Light"         -> 800f // Light has its own visual elsewhere, this is fallback
         "Magnetic"      -> 80f
         "Humidity"      -> 100f
         "Ambient Temp"  -> 40f
         "Heart Rate"    -> 160f
-        "Pressure"      -> 60f
+        "Pressure"      -> 60f   // ~980–1040 hPa span
         "Step Counter"  -> 20_000f
         "HRV"           -> 80f
         else -> 50f
@@ -185,7 +164,6 @@ fun GyroWaveform(hx: List<Float>, hy: List<Float>, hz: List<Float>, range: Float
     }
 }
 
-/* ==== Special readouts ==== */
 @Composable
 fun GravityTuner(values: FloatArray) {
     val g = magnitude(values)
@@ -269,7 +247,7 @@ fun InverseSquareLight(lux: Float) {
     NeonHeatBarNormalized(bar)
 }
 
-/* ==== Cards & list bits ==== */
+/* Cards */
 
 @Composable
 fun LiveValuesLine(values: FloatArray) {
@@ -313,8 +291,7 @@ fun SensorCard(name: String, values: FloatArray, onResetSteps: () -> Unit) {
             }
             "Light" -> InverseSquareLight(values.getOrNull(0) ?: 0f)
             "Heart Rate" -> {
-                val bpm = values.getOrNull(0) ?: 0f
-                HeartPulse(bpm = bpm.coerceIn(30f, 200f))
+                val bpm = values.getOrNull(0) ?: 0f; HeartPulse(bpm = bpm.coerceIn(30f, 200f))
             }
             "HRV" -> {
                 val rmssd = values.getOrNull(0) ?: 0f
@@ -323,12 +300,8 @@ fun SensorCard(name: String, values: FloatArray, onResetSteps: () -> Unit) {
             "Step Counter" -> {
                 val raw = values.getOrNull(0) ?: 0f
                 val session = values.getOrNull(1) ?: 0f
-                // Click to reset: handled by Dashboard via onResetSteps()
-                Column(Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color.Transparent)
-                    .padding(0.dp)
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.Transparent).padding(0.dp)
                 ) {
                     StepsRow(raw, session)
                     Spacer(Modifier.height(4.dp))
@@ -355,7 +328,6 @@ fun SensorCard(name: String, values: FloatArray, onResetSteps: () -> Unit) {
     Spacer(Modifier.height(10.dp))
 }
 
-/* ==== Background microgrid ==== */
 @Composable
 fun MicrogridParallax() {
     var phase by remember { mutableStateOf(0f) }
@@ -367,5 +339,3 @@ fun MicrogridParallax() {
         var y = -phase; while (y < h) { drawLine(line, Offset(0f,y), Offset(w,y), 1f); y += spacing }
     }
 }
-
-
