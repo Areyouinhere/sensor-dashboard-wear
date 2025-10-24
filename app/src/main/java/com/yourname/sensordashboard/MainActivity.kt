@@ -43,25 +43,6 @@ import kotlin.math.sqrt
    GLOBAL STATE + UTILITIES
    ========================= */
 
-// Small helper for auto-ranging signals (used by magScale/lightScale)
-private class AutoScaler(
-    private val decay: Float = 0.995f,
-    private val floor: Float = 0.1f,
-    private val ceil: Float = 100f
-) {
-    private var hi = floor
-    private var lo = floor
-    fun norm(value: Float): Float {
-        if (!value.isFinite()) return 0f
-        if (value > hi) hi = min(value, ceil)
-        if (value < lo) lo = max(value, floor)
-        hi = max(hi * decay, value)
-        lo = min(lo / decay, value)
-        val span = (hi - lo).coerceAtLeast(1e-3f)
-        return ((value - lo) / span).coerceIn(0f, 1f)
-    }
-}
-
 val orientationDegState = mutableStateOf(floatArrayOf(0f, 0f, 0f))
 val stepBaselineState   = mutableStateOf<Float?>(null) // shared steps baseline
 
@@ -574,6 +555,35 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                     color = Color(0xAA,0xFF,0xFF),
                     lineHeight = 14.sp
                 )
+
+
+                /* ================= UTILITIES ================= */
+
+// ↓ PLACE IT RIGHT HERE (before magnitude / fmtPct / etc.)
+private class AutoScaler(
+    private val decay: Float = 0.995f,
+    private val floor: Float = 0.1f,
+    private val ceil: Float = 100f
+) {
+    private var hi = floor
+    private var lo = floor
+    fun norm(value: Float): Float {
+        if (!value.isFinite()) return 0f
+        if (value > hi) hi = min(value, ceil)
+        if (value < lo) lo = max(value, floor)
+        hi = max(hi * decay, value)
+        lo = min(lo / decay, value)
+        val span = (hi - lo).coerceAtLeast(1e-3f)
+        return ((value - lo) / span).coerceIn(0f, 1f)
+    }
+}
+
+// keep these underneath
+private fun magnitude(v: FloatArray): Float = sqrt(v.fold(0f) { s, x -> s + x*x })
+private fun fmtPct(v: Float): String = "${(v.coerceIn(0f,1f)*100f).roundToInt()}%"
+private fun fmtMs(v: Float): String  = "${v.roundToInt()} ms"
+private fun fmt1(v: Float): String   = "%.1f".format(v.coerceIn(0f,1f))
+
             }
         }
     }
