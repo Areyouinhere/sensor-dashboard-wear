@@ -67,6 +67,7 @@ private fun readingsToDayMetrics(readings: Map<String, FloatArray>): DayMetrics 
 
 // Orientation (azimuth, pitch, roll) in degrees
 private val orientationDegState = mutableStateOf(floatArrayOf(0f, 0f, 0f))
+val stepBaselineState = mutableStateOf<Float?>(null)
 // Adaptive scalers so bars are responsive across environments
 private val lightScale = AutoScaler(decay = 0.995f, floor = 1f, ceil = 20_000f) // lux
 private val magScale   = AutoScaler(decay = 0.995f, floor = 5f,  ceil = 150f)    // µT
@@ -78,7 +79,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private val readings = mutableStateMapOf<String, FloatArray>()
     private var availableSensors by mutableStateOf(listOf<String>())
-    private var stepBaseline by mutableStateOf<Float?>(null)
 
     // Last raw vectors for fusion
     private var lastAccel: FloatArray? = null
@@ -172,11 +172,18 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         val key = labelFor(event.sensor.type)
 
         if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
-            val raw = event.values.firstOrNull() ?: 0f
-            if (stepBaseline == null) stepBaseline = raw
-            val session = raw - (stepBaseline ?: raw)
-            readings[key] = floatArrayOf(raw, session)
-            return
+    val raw = event.values.firstOrNull() ?: 0f
+    val base = stepBaselineState.value
+    // auto-reset baseline if counter rolled back (reboot or device reset)
+    if (base == null || raw < base - 10f) {
+        stepBaselineState.value = raw
+        CompassModel.notifySessionReset() // keep ACWR sane
+    }
+    val session = raw - (stepBaselineState.value ?: raw)
+    readings[key] = floatArrayOf(raw, session)
+    return
+}
+
         }
 
         when (event.sensor.type) {
@@ -512,6 +519,11 @@ private fun SensorCard(name: String, values: FloatArray) {
                 val rmssd = values.getOrNull(0) ?: 0f
                 CenteredZeroBar(rmssd - 50f, visualRange = 80f) // center ~50ms
             }
+            "Step Counter") {
+                    stepBaselineState.value = readings["Step Counter"]?.getOrNull(0)
+                    CompassModel.notifySessionReset()
+                }
+            }    
             else -> {
                 NeonHeatBar(name, values)
             }
@@ -606,36 +618,38 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                 val sz = Size(d, d)
 
                 // track
+                // track
                 drawArc(
                     color = Color(0x22, 0xFF, 0xFF),
                     startAngle = -90f,
                     sweepAngle = 360f,
                     useCenter = false,
-                    topLeft = offset,
+                    topLeft = tl,
                     size = sz,
                     style = Stroke(width = 8f, cap = StrokeCap.Round)
                 )
+
                 // glow
                 drawArc(
                     color = glow,
                     startAngle = -90f,
-                    sweepAngle = 360f * pct.coerceIn(0f, 1f),
+                    sweepAngle = 360f * pct,
                     useCenter = false,
-                    topLeft = offset,
+                    topLeft = tl,
                     size = sz,
                     style = Stroke(width = 10f, cap = StrokeCap.Round)
                 )
+
                 // core
                 drawArc(
                     color = core,
                     startAngle = -90f,
                     sweepAngle = (360f * pct).coerceAtLeast(6f),
                     useCenter = false,
-                    topLeft = offset,
+                    topLeft = tl,
                     size = sz,
                     style = Stroke(width = 5f, cap = StrokeCap.Round)
                 )
-            }
 
             // 0 = innermost (subtle neon tweak for readability)
             ring(0, hrvPresence,     Color(0x55, 0xFF, 0xAA), Color(0xFF, 0xCC, 0x66)) // HRV
