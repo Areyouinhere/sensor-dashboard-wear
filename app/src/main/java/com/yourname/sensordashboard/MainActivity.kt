@@ -375,13 +375,17 @@ private fun Dashboard(
         }
 
         items.forEach { (name, values) ->
-            SensorCard(name, values, onResetSteps = {
+            SensorCard(
+                name = name,
+                values = values,
                 onResetSteps = {
                     if (name == "Step Counter") {
                         stepBaselineState.value = readings["Step Counter"]?.getOrNull(0)
                         CompassModel.notifySessionReset()
                     }
                 }
+            )
+
 
         }
 
