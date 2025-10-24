@@ -698,10 +698,6 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
 
 /* ================= UTILITIES ================= */
 
-private fun magnitude(v: FloatArray): Float = sqrt(v.fold(0f) { s, x -> s + x*x })
-private fun fmtPct(v: Float): String = "${(v.coerceIn(0f,1f)*100f).roundToInt()}%"
-private fun fmtMs(v: Float): String  = "${v.roundToInt()} ms"
-private fun fmt1(v: Float): String   = "%.1f".format(v.coerceIn(0f,1f))
 private fun labelFor(type: Int): String = when (type) {
     Sensor.TYPE_ACCELEROMETER       -> "Accelerometer"
     Sensor.TYPE_GYROSCOPE           -> "Gyroscope"
@@ -717,8 +713,4 @@ private fun labelFor(type: Int): String = when (type) {
     Sensor.TYPE_STEP_COUNTER        -> "Step Counter"
     Sensor.TYPE_HEART_BEAT          -> "Heart Beat"
     else -> "Type $type"
-}
-
-@Composable private fun DividerLine() {
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x22,0xFF,0xFF)))
 }
