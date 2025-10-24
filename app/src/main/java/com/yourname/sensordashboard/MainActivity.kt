@@ -45,6 +45,7 @@ import kotlin.math.*
 val orientationDegState = mutableStateOf(floatArrayOf(0f, 0f, 0f))
 private val lightScale = AutoScaler(decay = 0.997f, floor = 0.1f, ceil = 40_000f)
 private val magScale   = AutoScaler(decay = 0.995f, floor = 5f,   ceil = 150f)
+val stepBaselineState = mutableStateOf<Float?>(null)
 
 /* ================= ACTIVITY ================= */
 
@@ -53,7 +54,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private val readings = mutableStateMapOf<String, FloatArray>()
     private var availableSensors by mutableStateOf(listOf<String>())
-    private var stepBaseline by mutableStateOf<Float?>(null)
+    
 
     private var lastAccel: FloatArray? = null
     private var lastMag:   FloatArray? = null
@@ -142,16 +143,17 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
         if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
             val raw = event.values.firstOrNull() ?: 0f
+            val base = stepBaselineState.value
             // auto-reset baseline if counter rolled back (reboot or device reset)
-            val base = stepBaseline
             if (base == null || raw < base - 10f) {
-                stepBaseline = raw
+                stepBaselineState.value = raw
                 CompassModel.notifySessionReset() // keep ACWR sane
             }
-            val session = raw - (stepBaseline ?: raw)
+            val session = raw - (stepBaselineState.value ?: raw)
             readings[key] = floatArrayOf(raw, session)
             return
         }
+
 
         when (event.sensor.type) {
             Sensor.TYPE_ACCELEROMETER -> {
@@ -374,11 +376,13 @@ private fun Dashboard(
 
         items.forEach { (name, values) ->
             SensorCard(name, values, onResetSteps = {
-                if (name == "Step Counter") {
-                    stepBaseline = readings["Step Counter"]?.getOrNull(0)
-                    CompassModel.notifySessionReset()
+                onResetSteps = {
+                    if (name == "Step Counter") {
+                        stepBaselineState.value = readings["Step Counter"]?.getOrNull(0)
+                        CompassModel.notifySessionReset()
+                    }
                 }
-            })
+
         }
 
         Spacer(Modifier.height(8.dp))
@@ -503,12 +507,38 @@ private fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                 val tl = Offset(cx-r, cy-r)
                 val sz = Size(d,d)
                 // track
-                drawArc(Color(0x22,0xFF,0xFF), -90f, 360f, false, tl, sz, Stroke(8f, StrokeCap.Round))
+                drawArc(
+                    color = Color(0x22, 0xFF, 0xFF),
+                    startAngle = -90f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = tl,
+                    size = sz,
+                    style = Stroke(width = 8f, cap = StrokeCap.Round)
+                )
+
                 // glow
-                drawArc(glow, -90f, 360f*pct, false, tl, sz, Stroke(10f, StrokeCap.Round))
+                drawArc(
+                    color = glow,
+                    startAngle = -90f,
+                    sweepAngle = 360f * pct,
+                    useCenter = false,
+                    topLeft = tl,
+                    size = sz,
+                    style = Stroke(width = 10f, cap = StrokeCap.Round)
+                )
+
                 // core
-                drawArc(core, -90f, (360f*pct).coerceAtLeast(6f), false, tl, sz, Stroke(5f, StrokeCap.Round))
-            }
+                drawArc(
+                    color = core,
+                    startAngle = -90f,
+                    sweepAngle = (360f * pct).coerceAtLeast(6f),
+                    useCenter = false,
+                    topLeft = tl,
+                    size = sz,
+                    style = Stroke(width = 5f, cap = StrokeCap.Round)
+                )
+
 
             ring(0, hrvPresence,     Color(0x55,0xFF,0xAA), Color(0xFF,0xCC,0x66))
             ring(1, hrPresence,      Color(0x66,0x80,0xFF), Color(0xFF,0xE0,0x80))
