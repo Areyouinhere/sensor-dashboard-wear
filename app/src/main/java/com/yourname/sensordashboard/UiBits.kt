@@ -29,6 +29,18 @@ import kotlin.math.sin
  */
 
 @Composable
+fun DividerLine() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(1.dp)
+            .clip(RoundedCornerShape(0.dp))
+            .background(Color(0x22, 0xFF, 0xFF))
+    )
+}
+
+
+@Composable
 fun HeartPulse(bpm: Float) {
     val beatMs = (60000f / bpm.coerceAtLeast(30f)).toLong()
     val scale = remember { Animatable(0.8f) }
