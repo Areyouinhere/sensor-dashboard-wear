@@ -328,7 +328,7 @@ object SensorHistory {
 
 /* ================= ADAPTIVE SCALER ================= */
 
-private class AutoScaler(
+class AutoScaler(
     private val decay: Float = 0.995f,
     private val floor: Float = 0.1f,
     private val ceil: Float = 100f
