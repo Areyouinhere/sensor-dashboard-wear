@@ -30,22 +30,147 @@ import kotlin.math.ln
 import kotlin.math.min
 import kotlin.math.sin
 
+/* ==== Dividers ==== */
+@Composable fun DividerLine() {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x22, 0xFF, 0xFF)))
+}
+
+/* ==== Loading state ==== */
 @Composable
-fun DividerLine() {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(1.dp)
-            .clip(RoundedCornerShape(0.dp))
-            .background(Color(0x22, 0xFF, 0xFF))
-    )
+fun WaitingPulseDots() {
+    var dots by remember { mutableStateOf(0) }
+    val alpha = remember { Animatable(1f) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        scope.launch { while(true){ alpha.animateTo(0.3f, tween(800)); alpha.animateTo(1f, tween(800)) } }
+        scope.launch { while(true){ delay(500); dots = (dots + 1) % 4 } }
+    }
+    Text("Listening" + ".".repeat(dots), fontSize = 12.sp, color = Color.Gray.copy(alpha = alpha.value))
+}
+
+/* ==== Core atoms ==== */
+@Composable
+fun NeonHeatBar(name: String, values: FloatArray) {
+    val mag = magnitude(values)
+    val scale = when (name) {
+        "Accelerometer" -> 8f
+        "Linear Accel"  -> 4f
+        "Gravity"       -> 1.2f
+        "Gyroscope"     -> 4f
+        "Rotation Vector" -> 1.5f
+        "Light"         -> 800f
+        "Magnetic"      -> 80f
+        "Humidity"      -> 100f
+        "Ambient Temp"  -> 40f
+        "Heart Rate"    -> 160f
+        "Pressure"      -> 60f
+        "Step Counter"  -> 20_000f
+        "HRV"           -> 80f
+        else -> 50f
+    }
+    NeonHeatBarNormalized((mag / scale).coerceIn(0f, 1f))
 }
 
 @Composable
-fun ThinDivider() { DividerLine() }
+fun NeonHeatBarNormalized(norm: Float) {
+    val anim = remember { Animatable(0f) }
+    LaunchedEffect(norm) { anim.animateTo(norm.coerceIn(0f, 1f), tween(220)) }
+    val track = Color(0x33,0xFF,0xFF); val glow = Color(0x66,0x00,0xEA); val core = Color(0xFF,0xD7,0x00)
+    Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(track)) {
+        Box(Modifier.fillMaxWidth(anim.value).height(10.dp).background(glow.copy(alpha = 0.6f)))
+        Box(Modifier.fillMaxWidth((anim.value*0.98f).coerceAtLeast(0.02f)).height(6.dp)
+            .padding(vertical = 2.dp).clip(RoundedCornerShape(3.dp)).background(core))
+    }
+}
 
 @Composable
-fun HeartPulse(bpm: Float) {
+fun CenteredZeroBar(value: Float, visualRange: Float) {
+    val clamped = (value / visualRange).coerceIn(-1f, 1f)
+    val anim = remember { Animatable(0f) }
+    LaunchedEffect(clamped) { anim.animateTo(clamped, tween(220)) }
+    val track = Color(0x22,0xFF,0xFF); val negGlow = Color(0x66,0x00,0xEA); val posGlow = Color(0xFF,0xD7,0x00)
+    Box(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(track)) {
+        val half = 0.5f; val amt = abs(anim.value)*half
+        Box(Modifier.fillMaxWidth(half + amt).height(14.dp).clip(RoundedCornerShape(7.dp))
+            .background(if (anim.value >= 0f) posGlow.copy(alpha=0.35f) else negGlow.copy(alpha=0.35f)))
+        Box(Modifier.fillMaxWidth(half + amt*0.92f).height(10.dp).padding(vertical=2.dp)
+            .clip(RoundedCornerShape(5.dp)).background(if (anim.value >= 0f) posGlow else negGlow))
+    }
+}
+
+/* ==== Graphs ==== */
+@Composable
+fun GyroWaveform(hx: List<Float>, hy: List<Float>, hz: List<Float>, range: Float = 6f) {
+    Canvas(Modifier.fillMaxWidth().height(64.dp)) {
+        val w = size.width; val h = size.height; val mid = h/2f
+        fun mapY(v: Float): Float { val c = v.coerceIn(-range, range); return mid - (c/range)*(h*0.45f) }
+        val grid = Color(0x22,0xFF,0xFF)
+        drawLine(grid, Offset(0f, mid), Offset(w, mid), 1f)
+        val columns = 8; val stepX = w/columns
+        for (i in 1 until columns) drawLine(grid.copy(alpha = 0.15f), Offset(stepX*i,0f), Offset(stepX*i,h), 1f)
+        fun drawSeries(series: List<Float>, core: Color) {
+            if (series.size < 2) return
+            val step = w/ (series.size-1).coerceAtLeast(1)
+            fun pass(a: Float, s: Float) {
+                var prev = Offset(0f, mapY(series[0]))
+                for (i in 1 until series.size) {
+                    val x = step*i; val y = mapY(series[i])
+                    drawLine(core.copy(alpha=a), prev, Offset(x,y), s); prev = Offset(x,y)
+                }
+            }
+            pass(0.22f,7f); pass(0.35f,4f); pass(1f,2f)
+        }
+        val gold = Color(0xFF,0xD7,0x00); val violet = Color(0x66,0x00,0xEA); val cyan = Color(0x00,0xD0,0xFF)
+        drawSeries(hx, gold); drawSeries(hy, violet); drawSeries(hz, cyan)
+    }
+}
+
+/** Simple sparkline for monotonic-ish ranges (light, pressure (after transform), HR) */
+@Composable
+fun Sparkline(normSeries: List<Float>) {
+    Canvas(Modifier.fillMaxWidth().height(44.dp)) {
+        val w = size.width; val h = size.height
+        val grid = Color(0x22,0xFF,0xFF)
+        drawLine(grid, Offset(0f, h*0.5f), Offset(w, h*0.5f), 1f)
+        if (normSeries.size < 2) return@Canvas
+        val step = w / (normSeries.size-1).coerceAtLeast(1)
+        var prev = Offset(0f, h*(1f - normSeries[0].coerceIn(0f,1f)))
+        for (i in 1 until normSeries.size) {
+            val y = h*(1f - normSeries[i].coerceIn(0f,1f))
+            val x = step*i
+            drawLine(Color(0xFF,0xD7,0x00).copy(alpha=0.35f), prev, Offset(x,y), 6f)
+            drawLine(Color(0xFF,0xD7,0x00), prev, Offset(x,y), 2f)
+            prev = Offset(x,y)
+        }
+    }
+}
+
+/* ==== Special readouts ==== */
+@Composable
+fun GravityTuner(values: FloatArray) {
+    val g = magnitude(values)
+    val center = 9.81f
+    val span = 0.30f // ±0.15g window
+    val norm = ((g - (center - span/2f)) / span).coerceIn(0f, 1f)
+    Canvas(Modifier.fillMaxWidth().height(54.dp)) {
+        val w = size.width; val h = size.height
+        val cx = w/2f; val cy = h*0.65f
+        val r = min(w,h)*0.45f
+        drawArc(
+            color = Color(0x22,0xFF,0xFF),
+            startAngle = 180f, sweepAngle = 180f, useCenter = false,
+            topLeft = Offset(cx-r, cy-r), size = Size(r*2, r*2),
+            style = Stroke(width = 6f, cap = StrokeCap.Round)
+        )
+        val ang = 180f + 180f * norm
+        val rad = ang * (PI/180f).toFloat()
+        val nx = cx + cos(rad)*r
+        val ny = cy + sin(rad)*r
+        drawLine(Color(0xFF,0xD7,0x00), Offset(cx,cy), Offset(nx,ny), 4f)
+    }
+}
+
+@Composable fun HeartPulse(bpm: Float) {
     val beatMs = (60000f / bpm.coerceAtLeast(30f)).toLong()
     val scale = remember { Animatable(0.8f) }
     LaunchedEffect(bpm) {
@@ -77,7 +202,7 @@ fun MagneticDial(heading: Float, strengthNorm: Float) {
             style = Stroke(width = 6f, cap = StrokeCap.Round)
         )
 
-        val ang = (-heading + 90f) * (PI/180f).toFloat()
+        val ang = (- (orientationDegState.value.getOrNull(0) ?: 0f) + 90f) * (PI/180f).toFloat()
         val nx = cx + cos(ang) * r
         val ny = cy - sin(ang) * r
         drawLine(Color(0xFF,0xD7,0x00), start = Offset(cx, cy), end = Offset(nx, ny), strokeWidth = 4f)
@@ -93,125 +218,100 @@ fun MagneticDial(heading: Float, strengthNorm: Float) {
 }
 
 @Composable
-fun WaitingPulseDots() {
-    var dots by remember { mutableStateOf(0) }
-    val alpha = remember { Animatable(1f) }
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) {
-        scope.launch { while(true){ alpha.animateTo(0.3f, tween(800)); alpha.animateTo(1f, tween(800)) } }
-        scope.launch { while(true){ delay(500); dots = (dots + 1) % 4 } }
-    }
-    Text("Listening" + ".".repeat(dots), fontSize = 12.sp, color = Color.Gray.copy(alpha = alpha.value))
-}
-
-@Composable
-fun NeonHeatBar(name: String, values: FloatArray) {
-    val mag = magnitude(values)
-    val scale = when (name) {
-        "Accelerometer" -> 8f
-        "Linear Accel"  -> 4f
-        "Gravity"       -> 1.2f
-        "Gyroscope"     -> 4f
-        "Rotation Vector" -> 1.5f
-        "Light"         -> 800f // Light has its own visual elsewhere, this is fallback
-        "Magnetic"      -> 80f
-        "Humidity"      -> 100f
-        "Ambient Temp"  -> 40f
-        "Heart Rate"    -> 160f
-        "Pressure"      -> 60f   // ~980–1040 hPa span
-        "Step Counter"  -> 20_000f
-        "HRV"           -> 80f
-        else -> 50f
-    }
-    NeonHeatBarNormalized((mag / scale).coerceIn(0f, 1f))
-}
-
-@Composable
-fun NeonHeatBarNormalized(norm: Float) {
-    val anim = remember { Animatable(0f) }
-    LaunchedEffect(norm) { anim.animateTo(norm.coerceIn(0f, 1f), tween(220)) }
-    val track = Color(0x33,0xFF,0xFF); val glow = Color(0x66,0x00,0xEA); val core = Color(0xFF,0xD7,0x00)
-    Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(track)) {
-        Box(Modifier.fillMaxWidth(anim.value).height(10.dp).background(glow.copy(alpha = 0.6f)))
-        Box(Modifier.fillMaxWidth((anim.value*0.98f).coerceAtLeast(0.02f)).height(6.dp)
-            .padding(vertical = 2.dp).clip(RoundedCornerShape(3.dp)).background(core))
-    }
-}
-
-@Composable
-fun GyroWaveform(hx: List<Float>, hy: List<Float>, hz: List<Float>, range: Float = 6f) {
-    Canvas(Modifier.fillMaxWidth().height(64.dp)) {
-        val w = size.width; val h = size.height; val mid = h/2f
-        fun mapY(v: Float): Float { val c = v.coerceIn(-range, range); return mid - (c/range)*(h*0.45f) }
-        val grid = Color(0x22,0xFF,0xFF)
-        drawLine(grid, Offset(0f, mid), Offset(w, mid), 1f)
-        val columns = 8; val stepX = w/columns
-        for (i in 1 until columns) drawLine(grid.copy(alpha = 0.15f), Offset(stepX*i,0f), Offset(stepX*i,h), 1f)
-        fun drawSeries(series: List<Float>, core: Color) {
-            if (series.size < 2) return
-            val step = w/ (series.size-1).coerceAtLeast(1)
-            fun pass(a: Float, s: Float) {
-                var prev = Offset(0f, mapY(series[0]))
-                for (i in 1 until series.size) {
-                    val x = step*i; val y = mapY(series[i])
-                    drawLine(core.copy(alpha=a), prev, Offset(x,y), s); prev = Offset(x,y)
-                }
-            }
-            pass(0.22f,7f); pass(0.35f,4f); pass(1f,2f)
-        }
-        val gold = Color(0xFF,0xD7,0x00); val violet = Color(0x66,0x00,0xEA); val cyan = Color(0x00,0xD0,0xFF)
-        drawSeries(hx, gold); drawSeries(hy, violet); drawSeries(hz, cyan)
-    }
-}
-
-@Composable
-fun GravityTuner(values: FloatArray) {
-    val g = magnitude(values)
-    val center = 9.81f
-    val span = 0.30f // ±0.15g window
-    val norm = ((g - (center - span/2f)) / span).coerceIn(0f, 1f)
-    Canvas(Modifier.fillMaxWidth().height(54.dp)) {
-        val w = size.width; val h = size.height
-        val cx = w/2f; val cy = h*0.65f
-        val r = min(w,h)*0.45f
-        drawArc(
-            color = Color(0x22,0xFF,0xFF),
-            startAngle = 180f, sweepAngle = 180f, useCenter = false,
-            topLeft = Offset(cx-r, cy-r), size = Size(r*2, r*2),
-            style = Stroke(width = 6f, cap = StrokeCap.Round)
-        )
-        val ang = 180f + 180f * norm
-        val rad = ang * (PI/180f).toFloat()
-        val nx = cx + cos(rad)*r
-        val ny = cy + sin(rad)*r
-        drawLine(Color(0xFF,0xD7,0x00), Offset(cx,cy), Offset(nx,ny), 4f)
-    }
-}
-
-@Composable
 fun StepsRow(raw: Float, session: Float) {
     Column {
-        Text("Raw: ${raw.toInt()} • Session: ${session.toInt()} (tap to reset)", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
+        Text("Raw: ${raw.toInt()} • Session: ${session.toInt()} (tap reset in list)", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
         val norm = (session / 12_000f).coerceIn(0f,1f)
         NeonHeatBarNormalized(norm)
     }
 }
 
+/* ==== Sensor card (Page 1) ==== */
+
 @Composable
-fun CenteredZeroBar(value: Float, visualRange: Float) {
-    val clamped = (value / visualRange).coerceIn(-1f, 1f)
-    val anim = remember { Animatable(0f) }
-    LaunchedEffect(clamped) { anim.animateTo(clamped, tween(220)) }
-    val track = Color(0x22,0xFF,0xFF); val negGlow = Color(0x66,0x00,0xEA); val posGlow = Color(0xFF,0xD7,0x00)
-    Box(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(track)) {
-        val half = 0.5f; val amt = abs(anim.value)*half
-        Box(Modifier.fillMaxWidth(half + amt).height(14.dp).clip(RoundedCornerShape(7.dp))
-            .background(if (anim.value >= 0f) posGlow.copy(alpha=0.35f) else negGlow.copy(alpha=0.35f)))
-        Box(Modifier.fillMaxWidth(half + amt*0.92f).height(10.dp).padding(vertical=2.dp)
-            .clip(RoundedCornerShape(5.dp)).background(if (anim.value >= 0f) posGlow else negGlow))
-    }
+fun LiveValuesLine(values: FloatArray) {
+    val txt = values.joinToString(limit = 3, truncated = "…") { v -> "%.2f".format(v) }
+    Text(txt, fontSize = 10.sp, color = Color(0xAA, 0xFF, 0xFF))
 }
 
+@Composable
+fun SensorCard(name: String, values: FloatArray, onResetSteps: () -> Unit) {
+    Text(name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    LiveValuesLine(values)
+    Box(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(Color(0x10, 0xFF, 0xFF)).padding(8.dp)
+    ) {
+        when (name) {
+            "Gyroscope" -> GyroWaveform(SensorHistory.gyroX, SensorHistory.gyroY, SensorHistory.gyroZ)
+            "Gravity"   -> GravityTuner(values)
+
+            "Accelerometer" -> {
+                // accel magnitude sparkline
+                val series = SensorHistory.accel.map { (it / 8f).coerceIn(0f,1f) }
+                Sparkline(series)
+            }
+
+            "Linear Accel" -> {
+                val mag = magnitude(values)
+                CenteredZeroBar(mag, visualRange = 4f)
+            }
+
+            "Rotation Vector" -> {
+                val ori = orientationDegState.value
+                RotationPseudo3D(
+                    x = ori.getOrNull(2) ?: 0f,
+                    y = ori.getOrNull(1) ?: 0f,
+                    z = (ori.getOrNull(0) ?: 0f) / 360f
+                )
+            }
+
+            "Magnetic" -> {
+                val hx = values.getOrNull(0) ?: 0f
+                val hy = values.getOrNull(1) ?: 0f
+                val hz = values.getOrNull(2) ?: 0f
+                val mag = kotlin.math.sqrt(hx*hx + hy*hy + hz*hz)
+                MagneticDial(heading = orientationDegState.value.getOrNull(0) ?: 0f, strengthNorm = magScale.norm(mag))
+            }
+
+            "Light" -> {
+                val series = SensorHistory.light.map { lightScale.norm(it) }
+                Sparkline(series)
+            }
+
+            "Pressure" -> {
+                // deviation from ~1013hPa
+                val dev = (values.getOrNull(0) ?: 1013f) - 1013f
+                CenteredZeroBar(dev, visualRange = 25f)
+            }
+
+            "Heart Rate" -> {
+                val bpm = values.getOrNull(0) ?: 0f
+                Column {
+                    HeartPulse(bpm = bpm.coerceIn(30f, 200f))
+                    val hrSeries = SensorHistory.hr.map { ((it - 40f) / 120f).coerceIn(0f,1f) }
+                    Sparkline(hrSeries)
+                }
+            }
+
+            "HRV" -> {
+                val rmssd = values.getOrNull(0) ?: 0f
+                CenteredZeroBar(rmssd - 50f, visualRange = 80f)
+            }
+
+            "Step Counter" -> {
+                val raw = values.getOrNull(0) ?: 0f
+                val session = values.getOrNull(1) ?: 0f
+                StepsRow(raw, session)
+            }
+
+            else -> NeonHeatBar(name, values)
+        }
+    }
+    Spacer(Modifier.height(10.dp))
+}
+
+/* ==== Rotation viz + microgrid ==== */
 @Composable
 fun RotationPseudo3D(x: Float, y: Float, z: Float) {
     val pitchDeg = y.coerceIn(-30f, 30f)
@@ -236,96 +336,6 @@ fun RotationPseudo3D(x: Float, y: Float, z: Float) {
         val dotR = 3f + 5f*intensity
         drawCircle(core, radius = dotR, center = Offset(cx,cy))
     }
-}
-
-@Composable
-fun InverseSquareLight(lux: Float) {
-    val t = (ln(1f + lux) / ln(1f + 40_000f)).coerceIn(0f,1f)
-    val inv = 1f - t
-    val emphasis = (1f - (inv*inv))
-    val bar = (0.15f + 0.85f*emphasis).coerceIn(0f,1f)
-    NeonHeatBarNormalized(bar)
-}
-
-/* Cards */
-
-@Composable
-fun LiveValuesLine(values: FloatArray) {
-    val txt = values.joinToString(limit = 3, truncated = "…") { v -> "%.2f".format(v) }
-    Text(txt, fontSize = 10.sp, color = Color(0xAA, 0xFF, 0xFF))
-}
-
-@Composable
-fun SensorCard(name: String, values: FloatArray, onResetSteps: () -> Unit) {
-    Text(name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-    LiveValuesLine(values)
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0x10, 0xFF, 0xFF))
-            .padding(8.dp)
-            .then(if (name == "Step Counter") Modifier else Modifier)
-    ) {
-        when (name) {
-            "Gyroscope" -> GyroWaveform(SensorHistory.gyroX, SensorHistory.gyroY, SensorHistory.gyroZ)
-            "Gravity"   -> GravityTuner(values)
-            "Linear Accel" -> {
-                val mag = magnitude(values); CenteredZeroBar(mag, visualRange = 4f)
-            }
-            "Rotation Vector" -> {
-                val ori = orientationDegState.value
-                RotationPseudo3D(
-                    x = ori.getOrNull(2) ?: 0f,
-                    y = ori.getOrNull(1) ?: 0f,
-                    z = (ori.getOrNull(0) ?: 0f) / 360f
-                )
-            }
-            "Magnetic" -> {
-                val hx = values.getOrNull(0) ?: 0f
-                val hy = values.getOrNull(1) ?: 0f
-                val hz = values.getOrNull(2) ?: 0f
-                val mag = kotlin.math.sqrt(hx*hx + hy*hy + hz*hz)
-                val heading = orientationDegState.value.getOrNull(0) ?: 0f
-                MagneticDial(heading = heading, strengthNorm = magScale.norm(mag))
-            }
-            "Light" -> InverseSquareLight(values.getOrNull(0) ?: 0f)
-            "Heart Rate" -> {
-                val bpm = values.getOrNull(0) ?: 0f; HeartPulse(bpm = bpm.coerceIn(30f, 200f))
-            }
-            "HRV" -> {
-                val rmssd = values.getOrNull(0) ?: 0f
-                CenteredZeroBar(rmssd - 50f, visualRange = 80f)
-            }
-            "Step Counter" -> {
-                val raw = values.getOrNull(0) ?: 0f
-                val session = values.getOrNull(1) ?: 0f
-                Column(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color.Transparent).padding(0.dp)
-                ) {
-                    StepsRow(raw, session)
-                    Spacer(Modifier.height(4.dp))
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0x22,0xFF,0xFF))
-                            .padding(vertical = 4.dp)
-                            .fillMaxWidth()
-                            .clickable { onResetSteps() }
-                    ) {
-                        Text(
-                            "Tap to reset session baseline",
-                            fontSize = 10.sp,
-                            color = Color(0xFF,0xD7,0x00),
-                            modifier = Modifier.align(Alignment.Center)
-                        )
-                    }
-                }
-            }
-            else -> NeonHeatBar(name, values)
-        }
-    }
-    Spacer(Modifier.height(10.dp))
 }
 
 @Composable
