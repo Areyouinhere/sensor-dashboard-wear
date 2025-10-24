@@ -20,32 +20,28 @@ import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Text
 import kotlin.math.abs
 import kotlin.math.min
-import com.yourname.sensordashboard.DividerLine
-
 
 /**
- * The Compass page you wanted live (not the “coming soon” stub).
- * It reads from current sensor values passed in from MainActivity.
+ * The Compass page you wanted live.
+ * Reads sensor values from MainActivity and displays normalized rings.
  */
 @Composable
 fun CompassPage(readings: Map<String, FloatArray>) {
-    // Pull signals
     val accel = readings["Accelerometer"] ?: floatArrayOf(0f, 0f, 0f)
     val gyro  = readings["Gyroscope"]     ?: floatArrayOf(0f, 0f, 0f)
     val hr    = readings["Heart Rate"]?.getOrNull(0) ?: 0f
     val press = readings["Pressure"]?.getOrNull(0)   ?: 1000f
     val hrv   = HRVHistory.rmssd()
 
-    // Human-calibrated norms
     fun soft01(x: Float) = x.coerceIn(0f, 1f)
     fun softKnee(x: Float, knee: Float = 0.6f): Float {
         val t = x.coerceIn(0f, 1f)
         return if (t < knee) t / knee * 0.7f else 0.7f + (t - knee) / (1f - knee) * 0.3f
     }
 
-    val accelMag = magnitude(accel)                // m/s²
-    val gyroMag  = magnitude(gyro)                 // rad/s
-    val nAccel   = soft01(accelMag / 6f)           // lively 0..~6
+    val accelMag = magnitude(accel)
+    val gyroMag  = magnitude(gyro)
+    val nAccel   = soft01(accelMag / 6f)
     val nGyro    = soft01(gyroMag  / 4f)
     val hrMid    = 65f
     val hrSpan   = 50f
@@ -53,18 +49,17 @@ fun CompassPage(readings: Map<String, FloatArray>) {
     val nP       = soft01((press - 980f) / 70f)
     val nHRV     = soft01(hrv / 80f)
 
-    // Smoothing
     val ema = remember { mutableStateOf(floatArrayOf(nAccel, nGyro, nHR, nP, nHRV)) }
     val alpha = 0.12f
     val target = floatArrayOf(nAccel, nGyro, nHR, nP, nHRV)
-    val smoothed = FloatArray(5) { i -> ema.value[i] + alpha * (target[i] - ema.value[i]) }
-    ema.value = smoothed
+    val s = FloatArray(5) { i -> ema.value[i] + alpha * (target[i] - ema.value[i]) }
+    ema.value = s
 
-    val hrvPresence      = softKnee(smoothed[4])
-    val hrPresence       = softKnee(1f - abs(smoothed[2] - 0.5f) * 2f)
-    val motionStability  = softKnee(1f - smoothed[1])
-    val accelPresence    = softKnee(smoothed[0])
-    val envBalance       = softKnee(1f - abs(smoothed[3] - 0.5f) * 2f)
+    val hrvPresence      = softKnee(s[4])
+    val hrPresence       = softKnee(1f - abs(s[2] - 0.5f) * 2f)
+    val motionStability  = softKnee(1f - s[1])
+    val accelPresence    = softKnee(s[0])
+    val envBalance       = softKnee(1f - abs(s[3] - 0.5f) * 2f)
 
     var showDetail by remember { mutableStateOf(false) }
 
@@ -85,7 +80,6 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         DividerLine()
         Spacer(Modifier.height(6.dp))
 
-        // Glyph
         androidx.compose.foundation.Canvas(
             Modifier
                 .fillMaxWidth()
@@ -102,7 +96,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
                 val topLeft = Offset(cx - r, cy - r)
                 val sz = Size(d, d)
 
-                // Use NAMED parameters so StrokeCap isn’t mistaken for alpha
+                // track
                 drawArc(
                     color = Color(0x22, 0xFF, 0xFF),
                     startAngle = -90f,
@@ -112,6 +106,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
                     size = sz,
                     style = Stroke(width = 8f, cap = StrokeCap.Round)
                 )
+                // glow
                 drawArc(
                     color = glow,
                     startAngle = -90f,
@@ -121,6 +116,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
                     size = sz,
                     style = Stroke(width = 10f, cap = StrokeCap.Round)
                 )
+                // core
                 drawArc(
                     color = core,
                     startAngle = -90f,
@@ -141,7 +137,6 @@ fun CompassPage(readings: Map<String, FloatArray>) {
 
         Spacer(Modifier.height(8.dp))
 
-        // Readouts
         Text(
             "HRV ${fmtMs(hrv)} • HR ${hr.toInt()} bpm • Motion ${fmtPct(1f - nGyro)}",
             fontSize = 12.sp,
