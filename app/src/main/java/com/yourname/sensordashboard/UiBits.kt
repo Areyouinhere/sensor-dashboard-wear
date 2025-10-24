@@ -3,6 +3,10 @@ package com.yourname.sensordashboard
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.Alignment
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -364,14 +368,4 @@ fun MicrogridParallax() {
     }
 }
 
-/* ==== Needed internal accessors ==== */
-// We keep these internal references here to avoid a circular import situation.
-// They’re read-only; push ops happen in MainActivity.
-internal object SensorHistory {
-    val gyroX: List<Float> get() = com.yourname.sensordashboard.SensorHistory.gyroX
-    val gyroY: List<Float> get() = com.yourname.sensordashboard.SensorHistory.gyroY
-    val gyroZ: List<Float> get() = com.yourname.sensordashboard.SensorHistory.gyroZ
-}
-internal object magScale {
-    fun norm(v: Float) = com.yourname.sensordashboard.magScale.norm(v)
-}
+
