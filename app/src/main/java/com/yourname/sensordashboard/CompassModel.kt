@@ -16,7 +16,7 @@ object CompassModel {
 
     // movement "micro load" bucket -> rolls into daily-ish ACWR-lite
     private var microLoad: Float = 0f
-    private val acuteWindow = Rolling(7)   // last 7 buckets
+    private val acuteWindow = Rolling(7)    // last 7 buckets
     private val chronicWindow = Rolling(28) // last 28 buckets (weekly averaged in logic)
 
     fun pushHR(bpm: Float) {
