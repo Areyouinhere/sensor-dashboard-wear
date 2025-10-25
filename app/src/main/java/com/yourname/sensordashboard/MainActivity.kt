@@ -9,10 +9,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement // <-- added for verticalArrangement
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
@@ -25,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -35,7 +36,6 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
-import androidx.compose.foundation.Canvas
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
@@ -375,7 +375,6 @@ fun Dashboard(
         DividerLine()
         Spacer(Modifier.height(10.dp))
 
-        // Only show sensors that currently have readings so the list is relevant
         availableSensors.forEach { sensor ->
             val label = labelFor(sensor.type)
             val values = readings[label]
@@ -387,14 +386,10 @@ fun Dashboard(
                         .background(UiSettings.bubbleBgColor)
                         .padding(8.dp)
                 ) {
-                    // Sensor header + values + visualization handled inside
                     SensorCard(label, values) {
-                        // reset steps (tap in your list if needed)
                         stepBaselineState.value = readings["Step Counter"]?.getOrNull(0)
                         CompassModel.notifySessionReset()
                     }
-
-                    // Extra metadata line for available sensors (type/id/range) – optional
                     Text(
                         "(${sensor.name}) • type=${sensor.type} • range=${sensor.maximumRange} • res=${sensor.resolution}",
                         fontSize = 10.sp, color = Color(0x99,0xFF,0xFF)
@@ -415,20 +410,17 @@ fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
     val hr    = readings["Heart Rate"]?.getOrNull(0) ?: 0f
     val hrv   = HRVHistory.rmssd()
 
-    // Normalize inputs
     val magA = magnitude(accel)
     val magG = magnitude(gyro)
-    val normA = (magA / 8f).coerceIn(0f,1f)           // movement magnitude (lower is calmer)
-    val normG = (magG / 4f).coerceIn(0f,1f)           // gyro magnitude (lower is calmer)
-    val hrvNorm = (hrv / 80f).coerceIn(0f,1f)         // HRV capacity
-    val hrNorm  = (hr / 150f).coerceIn(0f,1f)         // HR as fraction of 150 bpm
+    val normA = (magA / 8f).coerceIn(0f,1f)
+    val normG = (magG / 4f).coerceIn(0f,1f)
+    val hrvNorm = (hrv / 80f).coerceIn(0f,1f)
+    val hrNorm  = (hr / 150f).coerceIn(0f,1f)
     val hrCenterScore = (1f - abs(hrNorm - 0.5f) * 2f).coerceIn(0f,1f)
 
-    val coherence =
-        (0.35f * (1f - normG) + 0.30f * hrvNorm + 0.20f * hrCenterScore + 0.15f * (1f - normA))
-            .coerceIn(0f, 1f)
+    val coherence = (0.35f * (1f - normG) + 0.30f * hrvNorm + 0.20f * hrCenterScore + 0.15f * (1f - normA))
+        .coerceIn(0f, 1f)
 
-    // Red → Purple → Blue gradient that scales with coherence
     fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
     fun mix(c1: Color, c2: Color, t: Float) = Color(lerp(c1.red, c2.red, t), lerp(c1.green, c2.green, t), lerp(c1.blue, c2.blue, t), 1f)
     val red = Color(0xFF,0x44,0x44)
@@ -453,7 +445,6 @@ fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                 val cy = size.height / 2f
                 val rOuter = min(size.width, size.height) * 0.42f
 
-                // subtle outer tracks
                 listOf(0,1,2).forEach { i ->
                     drawArc(
                         color = Color(0x22, 0xFF, 0xFF),
@@ -466,15 +457,14 @@ fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                     )
                 }
 
-                // inner glowing orb scales with coherence
                 val orbRadius = max(10f, 70f * coherence)
                 drawCircle(color = orbColor.copy(alpha = 0.6f), radius = orbRadius * 1.25f, center = Offset(cx, cy))
                 drawCircle(color = orbColor, radius = orbRadius, center = Offset(cx, cy))
             }
             Column(
                 Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally
-                verticalAlignment = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center // <-- fixed (replaces bad verticalAlignment)
             ) {
                 Text("${fmtPct(coherence)}", fontSize = 16.sp, color = Color(0xFF,0xFF,0xFF))
                 Text("Overall Coherence", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
