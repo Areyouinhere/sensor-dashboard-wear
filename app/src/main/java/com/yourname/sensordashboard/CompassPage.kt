@@ -48,7 +48,8 @@ fun CompassPage(readings: Map<String, FloatArray>) {
     val hrMid    = 65f
     val hrSpan   = 50f
     val hrBand   = soft01(1f - abs((0.5f + (hr - hrMid)/(2f*hrSpan)) - 0.5f)*2f)
-    val envBal   = soft01(1f - abs(((press - 980f)/70f).coerceIn(0f,1f) - 0.5f)*2f)
+    val envBal   = soft01(1f - abs(((press - 1013f)/50f).coerceIn(-1f,1f)))
+
     val hrvCap   = soft01(hrv / 80f)
 
     val motionStability = knee(1f - nGyro)
@@ -57,7 +58,6 @@ fun CompassPage(readings: Map<String, FloatArray>) {
     val hrCentered      = knee(hrBand)
     val envCentered     = knee(envBal)
 
-    // Readiness tuned a little more recovery-forward than Page 2
     val readiness = (0.4f*recovery + 0.25f*hrCentered + 0.2f*motionStability + 0.1f*movement + 0.05f*envCentered)
         .coerceIn(0f,1f)
     val readinessLabel = when {
@@ -135,8 +135,14 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         DividerLine()
         Spacer(Modifier.height(10.dp))
 
-        // Sub-signal tiles (reuse tiny visuals)
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(UiSettings.bubbleBgColor)).padding(10.dp)) {
+        // --- Signals tile ---
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(UiSettings.bubbleBgColor)
+                .padding(10.dp)
+        ) {
             Text("Signals", fontSize = 12.sp, color = Color(0xEE,0xFF,0xFF))
             Spacer(Modifier.height(6.dp))
             Text("Recovery (HRV capacity) ${fmtPct(recovery)}", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
@@ -157,8 +163,14 @@ fun CompassPage(readings: Map<String, FloatArray>) {
 
         Spacer(Modifier.height(10.dp))
 
-        // Steps tile
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(UiSettings.bubbleBgColor)).padding(10.dp)) {
+        // --- Steps tile ---
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(UiSettings.bubbleBgColor)
+                .padding(10.dp)
+        ) {
             Text("Today’s Steps", fontSize = 12.sp, color = Color(0xEE,0xFF,0xFF))
             Spacer(Modifier.height(4.dp))
             val norm = (stepsSession / 12_000f).coerceIn(0f,1f)
@@ -170,7 +182,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         DividerLine()
         Spacer(Modifier.height(10.dp))
 
-        // Next steps (adaptive)
+        // --- Next steps tile ---
         val tipsBase = buildList {
             if (recovery < 0.45f) add("Keep it easy: prioritize sleep & light activity.")
             if (hrCentered < 0.5f) add("HR drifting: 5–7 min nasal breathing / easy walk.")
@@ -180,7 +192,13 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         }
         val tips = if (tipsBase.isEmpty()) listOf("You’re in a good zone — green light for planned work.") else tipsBase
 
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(UiSettings.bubbleBgColor)).padding(10.dp)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(UiSettings.bubbleBgColor)
+                .padding(10.dp)
+        ) {
             Text("Next Steps", fontSize = 12.sp, color = Color(0xFF,0xD7,0x00))
             Spacer(Modifier.height(6.dp))
             tips.forEach { line -> Text("• $line", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF)) }
