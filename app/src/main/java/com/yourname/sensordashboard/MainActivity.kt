@@ -473,8 +473,8 @@ fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
             }
             Column(
                 Modifier.fillMaxSize(),
-                verticalAlignment = Alignment.CenterVertically,
                 horizontalAlignment = Alignment.CenterHorizontally
+                verticalAlignment = Arrangement.Center,
             ) {
                 Text("${fmtPct(coherence)}", fontSize = 16.sp, color = Color(0xFF,0xFF,0xFF))
                 Text("Overall Coherence", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
