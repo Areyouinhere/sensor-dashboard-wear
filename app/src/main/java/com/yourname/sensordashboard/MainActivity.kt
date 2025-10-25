@@ -6,11 +6,11 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Bundle
-import androidx.compose.foundation.border
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -23,15 +23,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
-import kotlinx.coroutines.delay
+import androidx.compose.foundation.Canvas
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
@@ -39,7 +43,8 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-/* ===== AutoScaler + shared ===== */
+/* ===================== Shared helpers & state ===================== */
+
 class AutoScaler(
     private val decay: Float = 0.995f,
     private val floor: Float = 0.1f,
@@ -84,7 +89,8 @@ fun labelFor(type: Int): String = when (type) {
     else -> "Type $type"
 }
 
-/* ===== Activity ===== */
+/* ===================== Activity ===================== */
+
 class MainActivity : ComponentActivity(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
@@ -123,6 +129,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     private fun ensurePermissionsThenSubscribe() {
         subscribeSensors(registerHeartRate = false)
+
         val needsBody = ContextCompat.checkSelfPermission(
             this, android.Manifest.permission.BODY_SENSORS
         ) != android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -142,11 +149,13 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     private fun subscribeSensors(registerHeartRate: Boolean) {
         sensorManager.unregisterListener(this)
+
         fun reg(type: Int, delay: Int = SensorManager.SENSOR_DELAY_UI) {
             sensorManager.getDefaultSensor(type)?.let { s ->
                 sensorManager.registerListener(this, s, delay)
             }
         }
+
         reg(Sensor.TYPE_ACCELEROMETER)
         reg(Sensor.TYPE_GYROSCOPE)
         reg(Sensor.TYPE_LINEAR_ACCELERATION)
@@ -158,6 +167,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         reg(Sensor.TYPE_RELATIVE_HUMIDITY)
         reg(Sensor.TYPE_AMBIENT_TEMPERATURE)
         reg(Sensor.TYPE_STEP_COUNTER)
+
         if (registerHeartRate) {
             reg(Sensor.TYPE_HEART_RATE)
             reg(Sensor.TYPE_HEART_BEAT)
@@ -184,7 +194,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 lastAccel = event.values.copyOf()
                 SensorHistory.pushAccel(magnitude(event.values))
             }
-            Sensor.TYPE_MAGNETIC_FIELD -> { lastMag = event.values.copyOf() }
+            Sensor.TYPE_MAGNETIC_FIELD -> {
+                lastMag = event.values.copyOf()
+            }
             Sensor.TYPE_GYROSCOPE -> {
                 SensorHistory.pushGyro(
                     event.values.getOrNull(0) ?: 0f,
@@ -196,7 +208,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 lastAccel = event.values.copyOf()
                 SensorHistory.pushGrav(magnitude(event.values))
             }
-            Sensor.TYPE_ROTATION_VECTOR -> { lastRotVec = event.values.copyOf() }
+            Sensor.TYPE_ROTATION_VECTOR -> {
+                lastRotVec = event.values.copyOf()
+            }
             Sensor.TYPE_LIGHT -> SensorHistory.pushLight(event.values.getOrNull(0) ?: 0f)
             Sensor.TYPE_PRESSURE -> SensorHistory.pushPressure(event.values.getOrNull(0) ?: 0f)
             Sensor.TYPE_HEART_RATE -> {
@@ -244,16 +258,18 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     override fun onDestroy() { super.onDestroy(); sensorManager.unregisterListener(this) }
 }
 
-/* ===== HRV HISTORY, HISTORIES (unchanged) ===== */
+/* ===================== HRV history & sensor histories ===================== */
 
 object HRVHistory {
-    private val rrIntervals = mutableStateListOf<Float>()
+    private val rrIntervals = mutableStateListOf<Float>() // ms
     private var lastBeatMs: Long? = null
+
     fun push(rr: Float, max: Int = 30) {
         if (rr <= 0) return
         if (rrIntervals.size >= max) rrIntervals.removeAt(0)
         rrIntervals.add(rr)
     }
+
     fun pushFromHR(bpm: Float) {
         val now = System.currentTimeMillis()
         val last = lastBeatMs
@@ -261,6 +277,7 @@ object HRVHistory {
         if (last != null) push((now - last).toFloat())
         else push(60000f / bpm.coerceAtLeast(30f))
     }
+
     fun rmssd(): Float {
         if (rrIntervals.size < 2) return 0f
         var sum = 0f
@@ -268,7 +285,7 @@ object HRVHistory {
             val d = rrIntervals[i] - rrIntervals[i - 1]
             sum += d * d
         }
-        val raw = kotlin.math.sqrt(sum / (rrIntervals.size - 1))
+        val raw = sqrt(sum / (rrIntervals.size - 1))
         return HRVSmoother.filter(raw)
     }
 }
@@ -286,10 +303,12 @@ object SensorHistory {
     val light = mutableStateListOf<Float>()
     val pressure = mutableStateListOf<Float>()
     val hr = mutableStateListOf<Float>()
+
     private fun push(list: MutableList<Float>, v: Float, max: Int = 120) {
         if (list.size >= max) list.removeAt(0)
         list.add(v)
     }
+
     fun pushGyro(x: Float, y: Float, z: Float) { push(gyroX,x); push(gyroY,y); push(gyroZ,z) }
     fun pushAccel(m: Float) = push(accel, m)
     fun pushGrav(m: Float)  = push(grav, m)
@@ -298,14 +317,14 @@ object SensorHistory {
     fun pushHR(bpm: Float) = push(hr, bpm)
 }
 
-/* ===== Pager + Pages ===== */
+/* ===================== Pager root ===================== */
 
 @Composable
 private fun PagerRoot(
     availableSensors: List<Sensor>,
     readings: Map<String, FloatArray>
 ) {
-    val pagerState = rememberPagerState(pageCount = { 4 }) // +1 page for Settings
+    val pagerState = rememberPagerState(pageCount = { 4 }) // 1:Dashboard 2:Glyph 3:Compass 4:Settings
     Column(Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
@@ -316,7 +335,7 @@ private fun PagerRoot(
                 0 -> Dashboard(availableSensors, readings)
                 1 -> CoherenceGlyphPage(readings)
                 2 -> CompassPage(readings)
-                3 -> SettingsPage() // NEW
+                3 -> SettingsPage()
             }
         }
         Row(
@@ -330,7 +349,6 @@ private fun PagerRoot(
         }
     }
 }
-
 @Composable private fun Dot(active: Boolean) {
     Box(
         Modifier.size(if (active) 8.dp else 6.dp)
@@ -339,14 +357,147 @@ private fun PagerRoot(
     )
 }
 
-/* ===== PAGE 1 – Dashboard (unchanged layout; sensor list richer already) ===== */
-// (same Dashboard() as you have now; it pulls UiBits components and already prints rich sensor info)
+/* ===================== Page 1 – Dashboard ===================== */
 
-/* ===== PAGE 2 – Coherence Glyph ===== */
-// (use your current CoherenceGlyphPage from the last drop; just ensure any info
-//  cards use UiSettings.bubbleBgColor instead of light cyan)
+@Composable
+fun Dashboard(
+    availableSensors: List<Sensor>,
+    readings: Map<String, FloatArray>
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(14.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text("Sensor Dashboard", color = UiSettings.accentColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
+        DividerLine()
+        Spacer(Modifier.height(10.dp))
 
-/* ===== Settings Page (NEW) ===== */
+        // Only show sensors that currently have readings so the list is relevant
+        availableSensors.forEach { sensor ->
+            val label = labelFor(sensor.type)
+            val values = readings[label]
+            if (values != null) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(UiSettings.bubbleBgColor)
+                        .padding(8.dp)
+                ) {
+                    // Sensor header + values + visualization handled inside
+                    SensorCard(label, values) {
+                        // reset steps (tap in your list if needed)
+                        stepBaselineState.value = readings["Step Counter"]?.getOrNull(0)
+                        CompassModel.notifySessionReset()
+                    }
+
+                    // Extra metadata line for available sensors (type/id/range) – optional
+                    Text(
+                        "(${sensor.name}) • type=${sensor.type} • range=${sensor.maximumRange} • res=${sensor.resolution}",
+                        fontSize = 10.sp, color = Color(0x99,0xFF,0xFF)
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+        }
+    }
+}
+
+/* ===================== Page 2 – CoherenceGlyphPage ===================== */
+
+@Composable
+fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
+    val accel = readings["Accelerometer"] ?: floatArrayOf(0f, 0f, 0f)
+    val gyro  = readings["Gyroscope"]     ?: floatArrayOf(0f, 0f, 0f)
+    val hr    = readings["Heart Rate"]?.getOrNull(0) ?: 0f
+    val hrv   = HRVHistory.rmssd()
+
+    // Normalize inputs
+    val magA = magnitude(accel)
+    val magG = magnitude(gyro)
+    val normA = (magA / 8f).coerceIn(0f,1f)           // movement magnitude (lower is calmer)
+    val normG = (magG / 4f).coerceIn(0f,1f)           // gyro magnitude (lower is calmer)
+    val hrvNorm = (hrv / 80f).coerceIn(0f,1f)         // HRV capacity
+    val hrNorm  = (hr / 150f).coerceIn(0f,1f)         // HR as fraction of 150 bpm
+    val hrCenterScore = (1f - abs(hrNorm - 0.5f) * 2f).coerceIn(0f,1f)
+
+    val coherence =
+        (0.35f * (1f - normG) + 0.30f * hrvNorm + 0.20f * hrCenterScore + 0.15f * (1f - normA))
+            .coerceIn(0f, 1f)
+
+    // Red → Purple → Blue gradient that scales with coherence
+    fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
+    fun mix(c1: Color, c2: Color, t: Float) = Color(lerp(c1.red, c2.red, t), lerp(c1.green, c2.green, t), lerp(c1.blue, c2.blue, t), 1f)
+    val red = Color(0xFF,0x44,0x44)
+    val pur = Color(0xAA,0x55,0xFF)
+    val blu = Color(0x44,0xAA,0xFF)
+    val mid = mix(red, pur, coherence)
+    val orbColor = mix(mid, blu, coherence)
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("Coherence", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = UiSettings.accentColor)
+        Spacer(Modifier.height(6.dp)); DividerLine(); Spacer(Modifier.height(10.dp))
+
+        Box(Modifier.fillMaxWidth().height(220.dp)) {
+            Canvas(Modifier.fillMaxSize()) {
+                val cx = size.width / 2f
+                val cy = size.height / 2f
+                val rOuter = min(size.width, size.height) * 0.42f
+
+                // subtle outer tracks
+                listOf(0,1,2).forEach { i ->
+                    drawArc(
+                        color = Color(0x22, 0xFF, 0xFF),
+                        startAngle = 0f,
+                        sweepAngle = 360f,
+                        useCenter = false,
+                        topLeft = Offset(cx - rOuter + i*10f, cy - rOuter + i*10f),
+                        size = Size((rOuter - i*10f)*2, (rOuter - i*10f)*2),
+                        style = Stroke(width = 8f, cap = StrokeCap.Round)
+                    )
+                }
+
+                // inner glowing orb scales with coherence
+                val orbRadius = max(10f, 70f * coherence)
+                drawCircle(color = orbColor.copy(alpha = 0.6f), radius = orbRadius * 1.25f, center = Offset(cx, cy))
+                drawCircle(color = orbColor, radius = orbRadius, center = Offset(cx, cy))
+            }
+            Column(
+                Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("${fmtPct(coherence)}", fontSize = 16.sp, color = Color(0xFF,0xFF,0xFF))
+                Text("Overall Coherence", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(UiSettings.bubbleBgColor).padding(10.dp)
+        ) {
+            Text("What is this?", fontSize = 12.sp, color = UiSettings.accentColor)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "This glyph blends motion stability (gyro calm), HRV capacity, HR centering, and movement moderation into a single coherence signal. " +
+                        "Blue ≈ high coherence (calm focus). Purple ≈ transitional. Red ≈ stress/noise.",
+                fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF), lineHeight = 14.sp
+            )
+        }
+    }
+}
+
+/* ===================== Page 4 – Settings ===================== */
 
 @Composable
 fun SettingsPage() {
@@ -357,7 +508,6 @@ fun SettingsPage() {
             modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally))
         Spacer(Modifier.height(6.dp)); DividerLine(); Spacer(Modifier.height(10.dp))
 
-        // Color swatches
         SettingSection("Accent Color") {
             ColorRow(
                 listOf(
@@ -398,7 +548,6 @@ fun SettingsPage() {
             ) { UiSettings.gridColor = it }
         }
 
-        // Sliders (simple discrete chips for watch-friendliness)
         SettingSection("Grid Speed") {
             ChipRow(
                 items = listOf(0.0f, 0.3f, 0.6f, 1.0f, 1.5f),
@@ -411,7 +560,6 @@ fun SettingsPage() {
                 selected = UiSettings.gridSpacing
             ) { UiSettings.gridSpacing = it }
         }
-
         SettingSection("Grid Style") {
             ToggleRow(
                 label = "Isometric",
@@ -428,7 +576,8 @@ fun SettingsPage() {
     }
 }
 
-/* --- tiny UI helpers --- */
+/* ===== Settings helpers (local) ===== */
+
 @Composable
 private fun SettingSection(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(
@@ -469,8 +618,8 @@ private fun ChipRow(items: List<Float>, selected: Float, onPick: (Float) -> Unit
                     .clickable { onPick(v) }
                     .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
-                Text(if (items.first() < 10f) "${v.toInt()}px" else "%.1f".format(v),
-                    fontSize = 11.sp, color = Color(0xDD,0xFF,0xFF))
+                val label = if (items.maxOrNull() ?: 0f <= 3f) "%.1f".format(v) else "${v.toInt()}px"
+                Text(label, fontSize = 11.sp, color = Color(0xDD,0xFF,0xFF))
             }
         }
     }
