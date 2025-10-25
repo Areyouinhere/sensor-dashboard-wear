@@ -267,7 +267,7 @@ fun SensorCard(name: String, values: FloatArray, onResetSteps: () -> Unit) {
 
             "Accelerometer" -> {
                 val series = SensorHistory.accel.map { (it / 8f).coerceIn(0f,1f) }
-                Sparkline(series = series)
+                Sparkline(normSeries = series) // FIXED arg name
             }
 
             "Linear Accel" -> {
@@ -297,7 +297,7 @@ fun SensorCard(name: String, values: FloatArray, onResetSteps: () -> Unit) {
 
             "Light" -> {
                 val series = SensorHistory.light.map { lightScale.norm(it) }
-                Sparkline(series)
+                Sparkline(normSeries = series) // FIXED arg name
             }
 
             "Pressure" -> {
@@ -310,7 +310,7 @@ fun SensorCard(name: String, values: FloatArray, onResetSteps: () -> Unit) {
                 Column {
                     HeartPulse(bpm = bpm.coerceIn(30f, 200f))
                     val hrSeries = SensorHistory.hr.map { ((it - 40f) / 120f).coerceIn(0f,1f) }
-                    Sparkline(hrSeries)
+                    Sparkline(normSeries = hrSeries) // FIXED arg name
                 }
             }
 
@@ -408,3 +408,6 @@ fun MicrogridParallax() {
         }
     }
 }
+
+/* ==== tiny helpers ==== */
+fun magnitude(v: FloatArray): Float = kotlin.math.sqrt(v.fold(0f) { s, x -> s + x*x })
