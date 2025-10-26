@@ -5,6 +5,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
@@ -24,18 +25,18 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.wear.compose.material.Slider
 import androidx.wear.compose.material.Text
+import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 import kotlin.math.sin
-import kotlin.math.PI
+import kotlin.math.sqrt
 
 /**
  * Page 3: Coherence Compass – composite readiness + guidance + notes + tone generator.
+ * This version removes the Wear Slider (uses +/- chips instead) and avoids helper duplication.
  */
 @Composable
 fun CompassPage(readings: Map<String, FloatArray>) {
@@ -76,12 +77,12 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         else -> "RED"
     }
 
-    // Notes state (session-only memory)
+    // Notes (session-only memory)
     val noteState = remember { mutableStateOf("") }
 
-    // Tone player state
+    // Tone player state (simple sine)
     val tonePlayer = remember { TonePlayer() }
-    var freq by remember { mutableStateOf(432f) } // default pleasant freq
+    var freq by remember { mutableStateOf(432f) }
     var playing by remember { mutableStateOf(false) }
 
     Column(
@@ -181,55 +182,42 @@ fun CompassPage(readings: Map<String, FloatArray>) {
 
         Spacer(Modifier.height(10.dp))
 
-        // --- Frequency generator tile ---
+        // --- Frequency generator tile (no Slider; simple +/- and presets) ---
         InfoTile(title = "Frequency Generator") {
             Text("Sine tone • ${freq.roundToInt()} Hz", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
-            Spacer(Modifier.height(6.dp))
-            // Wear Slider expects 0..1; map to 100..1000
-            var slider by remember { mutableStateOf((freq - 100f) / 900f) }
-            Slider(
-                value = slider.coerceIn(0f,1f),
-                onValueChange = {
-                    slider = it
-                    val f = 100f + 900f * slider
-                    freq = f
-                    if (playing) tonePlayer.setFrequency(freq)
-                },
-            )
             Spacer(Modifier.height(6.dp))
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ActionChip(
-                    label = if (playing) "Stop" else "Start",
-                    onClick = {
-                        if (playing) {
-                            tonePlayer.stop()
-                            playing = false
-                        } else {
-                            tonePlayer.start(freq)
-                            playing = true
-                        }
+                ActionChip("−10 Hz") {
+                    freq = (freq - 10f).coerceIn(100f, 1000f)
+                    if (playing) tonePlayer.setFrequency(freq)
+                }
+                ActionChip(if (playing) "Stop" else "Start") {
+                    if (playing) {
+                        tonePlayer.stop()
+                        playing = false
+                    } else {
+                        tonePlayer.start(freq)
+                        playing = true
                     }
-                )
-                ActionChip(
-                    label = "432 Hz",
-                    onClick = {
-                        freq = 432f
-                        slider = (freq - 100f) / 900f
-                        if (playing) tonePlayer.setFrequency(freq)
-                    }
-                )
-                ActionChip(
-                    label = "528 Hz",
-                    onClick = {
-                        freq = 528f
-                        slider = (freq - 100f) / 900f
-                        if (playing) tonePlayer.setFrequency(freq)
-                    }
-                )
+                }
+                ActionChip("+10 Hz") {
+                    freq = (freq + 10f).coerceIn(100f, 1000f)
+                    if (playing) tonePlayer.setFrequency(freq)
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                ActionChip("100 Hz") { freq = 100f; if (playing) tonePlayer.setFrequency(freq) }
+                ActionChip("432 Hz") { freq = 432f; if (playing) tonePlayer.setFrequency(freq) }
+                ActionChip("528 Hz") { freq = 528f; if (playing) tonePlayer.setFrequency(freq) }
+                ActionChip("1000 Hz"){ freq = 1000f; if (playing) tonePlayer.setFrequency(freq) }
             }
         }
 
@@ -252,13 +240,10 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         Spacer(Modifier.height(12.dp))
     }
 
-    // Make sure to stop tone if this composable leaves composition
-    DisposableEffect(Unit) {
-        onDispose { tonePlayer.stop() }
-    }
+    DisposableEffect(Unit) { onDispose { tonePlayer.stop() } }
 }
 
-/* ===================== Building blocks ===================== */
+/* ===================== Building blocks (local, UI only) ===================== */
 
 @Composable
 private fun InfoTile(title: String, content: @Composable ColumnScope.() -> Unit) {
@@ -328,22 +313,12 @@ private fun ActionChip(label: String, onClick: () -> Unit) {
     Box(
         Modifier.clip(RoundedCornerShape(10.dp))
             .background(UiSettings.bubbleBgColor)
+            .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 6.dp)
-            .clickableNoRipple { onClick() }
     ) {
         Text(label, fontSize = 12.sp, color = Color(0xEE,0xFF,0xFF))
     }
 }
-
-/* lightweight clickable without ripple (keeps imports minimal) */
-@Composable
-private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
-    this.then(Modifier
-        .background(Color.Transparent)
-        .pointerInput(Unit) {
-            detectTapGestures(onTap = { onClick() })
-        }
-    )
 
 /* ===================== Local tone player ===================== */
 
@@ -360,25 +335,21 @@ private class TonePlayer {
 
     fun setFrequency(freq: Float) {
         if (track?.playState == AudioTrack.PLAYSTATE_PLAYING) {
-            start(freq) // rebuild buffer for new frequency (simple & safe)
+            start(freq) // rebuild for new frequency (simple & safe)
         } else {
             currentFreq = freq
         }
     }
 
     fun stop() {
-        try {
-            track?.stop()
-        } catch (_: Throwable) {}
-        try {
-            track?.release()
-        } catch (_: Throwable) {}
+        try { track?.stop() } catch (_: Throwable) {}
+        try { track?.release() } catch (_: Throwable) {}
         track = null
     }
 
     private fun buildSineTrack(freq: Float): AudioTrack {
         val sampleRate = 22050
-        val durationSec = 0.25f // short looping chunk
+        val durationSec = 0.25f
         val samples = (sampleRate * durationSec).toInt().coerceAtLeast(256)
         val buf = ShortArray(samples)
         val twoPiF = 2.0 * Math.PI * freq / sampleRate
@@ -404,15 +375,7 @@ private class TonePlayer {
             .setBufferSizeInBytes(buf.size * 2)
             .build().apply {
                 write(buf, 0, buf.size)
-                // loop entire buffer
-                // loop points in frames for MODE_STATIC: frame == sample for mono 16-bit
-                setLoopPoints(0, buf.size, -1)
+                setLoopPoints(0, buf.size, -1) // loop whole buffer
             }
     }
 }
-
-/* ===================== Local helpers ===================== */
-
-private fun magnitude(v: FloatArray): Float = sqrt(v.fold(0f) { s, x -> s + x*x })
-private fun fmtPct(v: Float): String = "${(v.coerceIn(0f,1f)*100f).roundToInt()}%"
-private fun fmtMs(v: Float): String  = "${v.roundToInt()} ms"
