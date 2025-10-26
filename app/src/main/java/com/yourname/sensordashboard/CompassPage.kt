@@ -1,9 +1,15 @@
 package com.yourname.sensordashboard
 
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -14,20 +20,23 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Text
-import androidx.compose.foundation.Canvas
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Page 3: Coherence Compass – composite & next-stage guidance.
- * Distinct from the ring glyph: readiness arc + sub-signal tiles + adaptive tips.
+ * Page 3: Coherence Compass – composite & next-stage guidance + Notes + Tone.
+ * - Reuses canonical helpers (magnitude, fmtPct, fmtMs) from MainActivity.kt
+ * - No sliders; tiny stepper buttons to avoid extra deps.
+ * - Audio tone generator kept minimal and lifecycle-safe.
  */
 @Composable
 fun CompassPage(readings: Map<String, FloatArray>) {
+    // --- Inputs (same as before) ---
     val accel = readings["Accelerometer"] ?: floatArrayOf(0f, 0f, 0f)
     val gyro  = readings["Gyroscope"]     ?: floatArrayOf(0f, 0f, 0f)
     val hr    = readings["Heart Rate"]?.getOrNull(0) ?: 0f
@@ -57,13 +66,26 @@ fun CompassPage(readings: Map<String, FloatArray>) {
     val hrCentered      = knee(hrBand)
     val envCentered     = knee(envBal)
 
-    // Readiness tuned a little more recovery-forward than Page 2
+    // Readiness leans slightly recovery-forward
     val readiness = (0.4f*recovery + 0.25f*hrCentered + 0.2f*motionStability + 0.1f*movement + 0.05f*envCentered)
         .coerceIn(0f,1f)
     val readinessLabel = when {
         readiness >= 0.66f -> "GREEN"
         readiness >= 0.40f -> "YELLOW"
         else -> "RED"
+    }
+
+    // --- Notes (persist in-memory for the session) ---
+    var notes by rememberSaveable { mutableStateOf("") }
+
+    // --- Simple tone generator state (stepper controls) ---
+    var freq by rememberSaveable { mutableStateOf(174f) }      // solfeggio-ish default
+    var playing by remember { mutableStateOf(false) }
+    val player = remember { SinePlayer() }
+    DisposableEffect(playing, freq) {
+        player.setFreq(freq)
+        if (playing) player.start() else player.stop()
+        onDispose { player.stop() } // ensure we stop if Composable leaves
     }
 
     Column(
@@ -135,7 +157,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         DividerLine()
         Spacer(Modifier.height(10.dp))
 
-        // Sub-signal tiles (reuse tiny visuals)
+        // Sub-signal tiles
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0x10,0xFF,0xFF)).padding(10.dp)) {
             Text("Signals", fontSize = 12.sp, color = Color(0xEE,0xFF,0xFF))
             Spacer(Modifier.height(6.dp))
@@ -171,14 +193,13 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         Spacer(Modifier.height(10.dp))
 
         // Next steps (adaptive)
-        val tipsBase = buildList {
+        val tips = buildList {
             if (recovery < 0.45f) add("Keep it easy: prioritize sleep & light activity.")
             if (hrCentered < 0.5f) add("HR drifting: 5–7 min nasal breathing / easy walk.")
             if (motionStability < 0.55f) add("High jitter: 1–2 sets balance/mobility.")
-            if (movement < 0.25f) add("Low movement: take a 10–15 min walk to prime.")
+            if (movement < 0.25f) add("Low movement: 10–15 min walk to prime.")
             if (envCentered < 0.45f) add("Pressure shift: ease into intensity; hydrate.")
-        }
-        val tips = if (tipsBase.isEmpty()) listOf("You’re in a good zone — green light for planned work.") else tipsBase
+        }.ifEmpty { listOf("You’re in a good zone — green light for planned work.") }
 
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0x12,0xFF,0xFF)).padding(10.dp)) {
             Text("Next Steps", fontSize = 12.sp, color = Color(0xFF,0xD7,0x00))
@@ -186,6 +207,134 @@ fun CompassPage(readings: Map<String, FloatArray>) {
             tips.forEach { line -> Text("• $line", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF)) }
         }
 
+        Spacer(Modifier.height(10.dp))
+
+        // Notes (session quick jot)
+        Column(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0f,0f,0f,0.80f)) // 80% black bubble
+                .padding(10.dp)
+        ) {
+            Text("Notes (today)", fontSize = 12.sp, color = Color(0xFF,0xD7,0x00))
+            Spacer(Modifier.height(6.dp))
+            Box(
+                Modifier.fillMaxWidth().heightIn(min = 60.dp).clip(RoundedCornerShape(8.dp))
+                    .background(Color(0f,0f,0f,0.4f)).padding(8.dp)
+            ) {
+                BasicTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    textStyle = TextStyle(color = Color(0xFF,0xFF,0xFF), fontSize = 12.sp),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFF,0xD7,0x00)),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // Simple Tone (frequency stepper + play/stop)
+        Column(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0f,0f,0f,0.80f))
+                .padding(10.dp)
+        ) {
+            Text("Tone (focus aid)", fontSize = 12.sp, color = Color(0xFF,0xD7,0x00))
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                fun Btn(label: String, onClick: () -> Unit) {
+                    Box(
+                        Modifier.clip(RoundedCornerShape(6.dp))
+                            .background(Color(0x22,0xFF,0xFF))
+                            .clickable { onClick() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) { Text(label, fontSize = 11.sp, color = Color(0xEE,0xFF,0xFF)) }
+                }
+                Row {
+                    Btn("−10") { freq = (freq - 10f).coerceIn(50f, 1000f) }
+                    Spacer(Modifier.width(6.dp))
+                    Btn("−1")  { freq = (freq - 1f).coerceIn(50f, 1000f) }
+                    Spacer(Modifier.width(6.dp))
+                    Text("${freq.toInt()} Hz", fontSize = 12.sp, color = Color(0xCC,0xFF,0xFF))
+                    Spacer(Modifier.width(6.dp))
+                    Btn("+1")  { freq = (freq + 1f).coerceIn(50f, 1000f) }
+                    Spacer(Modifier.width(6.dp))
+                    Btn("+10") { freq = (freq + 10f).coerceIn(50f, 1000f) }
+                }
+                val playLabel = if (playing) "Stop" else "Play"
+                Btn(playLabel) { playing = !playing }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (playing) "Playing sine ${freq.toInt()} Hz" else "Tap Play to start",
+                fontSize = 11.sp, color = Color(0x99,0xFF,0xFF)
+            )
+        }
+
         Spacer(Modifier.height(12.dp))
+    }
+}
+
+/* ========= Tiny audio helper ========= */
+private class SinePlayer {
+    @Volatile private var running = false
+    private var track: AudioTrack? = null
+    @Volatile private var freqHz: Double = 174.0
+    private val sampleRate = 44100
+    private val buffer = ShortArray(1024)
+
+    fun setFreq(f: Float) { freqHz = f.coerceIn(50f, 1000f).toDouble() }
+
+    fun start() {
+        if (running) return
+        running = true
+        if (track == null) {
+            track = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(buffer.size * 2)
+                .build()
+        }
+        track?.play()
+        // Lightweight producer thread
+        Thread {
+            var phase = 0.0
+            val twoPi = Math.PI * 2
+            while (running) {
+                val inc = twoPi * freqHz / sampleRate
+                var i = 0
+                while (i < buffer.size) {
+                    val s = kotlin.math.sin(phase)
+                    buffer[i] = (s * 32767).toInt().toShort()
+                    phase += inc
+                    if (phase >= twoPi) phase -= twoPi
+                    i++
+                }
+                track?.write(buffer, 0, buffer.size, AudioTrack.WRITE_BLOCKING)
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    fun stop() {
+        running = false
+        track?.pause()
+        track?.flush()
     }
 }
