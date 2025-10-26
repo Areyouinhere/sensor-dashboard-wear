@@ -18,15 +18,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Text
+import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * Page 3: Coherence Compass – composite & next-stage guidance + Notes + Tone.
@@ -75,11 +79,11 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         else -> "RED"
     }
 
-    // --- Notes (persist in-memory for the session) ---
-    var notes by rememberSaveable { mutableStateOf("") }
+    // --- Notes (session-only memory) ---
+    var notes by remember { mutableStateOf("") }       // was rememberSaveable
 
     // --- Simple tone generator state (stepper controls) ---
-    var freq by rememberSaveable { mutableStateOf(174f) }      // solfeggio-ish default
+    var freq by remember { mutableStateOf(174f) }      // was rememberSaveable
     var playing by remember { mutableStateOf(false) }
     val player = remember { SinePlayer() }
     DisposableEffect(playing, freq) {
@@ -149,7 +153,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
                     }
                 )
                 Spacer(Modifier.height(2.dp))
-                Text("HRV ${fmtMs(hrv)} • HR ${hr.toInt()} bpm", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
+                Text("HRV ${fmtMs(hrv)} • HR ${hr.roundToInt()} bpm", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
             }
         }
 
@@ -209,7 +213,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
 
         Spacer(Modifier.height(10.dp))
 
-        // Notes (session quick jot)
+        // Notes (session quick jot) — disambiguated BasicTextField
         Column(
             Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
@@ -224,9 +228,10 @@ fun CompassPage(readings: Map<String, FloatArray>) {
             ) {
                 BasicTextField(
                     value = notes,
-                    onValueChange = { notes = it },
+                    onValueChange = { newText -> notes = newText },
                     textStyle = TextStyle(color = Color(0xFF,0xFF,0xFF), fontSize = 12.sp),
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFF,0xD7,0x00)),
+                    maxLines = 6,
+                    cursorBrush = SolidColor(Color(0xFF,0xD7,0x00)),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp)
                 )
             }
@@ -248,7 +253,8 @@ fun CompassPage(readings: Map<String, FloatArray>) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                fun Btn(label: String, onClick: () -> Unit) {
+                @Composable
+                fun Btn(label: String, onClick: () -> Unit) {  // <- mark as @Composable
                     Box(
                         Modifier.clip(RoundedCornerShape(6.dp))
                             .background(Color(0x22,0xFF,0xFF))
