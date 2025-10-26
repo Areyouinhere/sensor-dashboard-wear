@@ -7,7 +7,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -32,11 +31,11 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 /**
- * Page 3: Coherence Compass – composite readiness + guidance + notes + tone generator.
- * This version removes the Wear Slider (uses +/- chips instead) and avoids helper duplication.
+ * Page 3: Coherence Compass – readiness + guidance + notes + tone generator.
+ * - No local helper duplicates; uses MainActivity.kt's magnitude/fmtPct/fmtMs.
+ * - Simple tone generator (Start/Stop, +/-10 Hz, presets).
  */
 @Composable
 fun CompassPage(readings: Map<String, FloatArray>) {
@@ -114,9 +113,13 @@ fun CompassPage(readings: Map<String, FloatArray>) {
                 )
 
                 fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
-                fun mix(c1: Color, c2: Color, t: Float) = Color(
-                    lerp(c1.red, c2.red, t), lerp(c1.green, c2.green, t), lerp(c1.blue, c2.blue, t), 1f
-                )
+                fun mix(c1: androidx.compose.ui.graphics.Color, c2: androidx.compose.ui.graphics.Color, t: Float) =
+                    androidx.compose.ui.graphics.Color(
+                        lerp(c1.red, c2.red, t),
+                        lerp(c1.green, c2.green, t),
+                        lerp(c1.blue, c2.blue, t),
+                        1f
+                    )
                 val red = Color(0xFF,0x44,0x44)
                 val yel = Color(0xFF,0xD7,0x00)
                 val grn = Color(0x44,0xFF,0x88)
@@ -182,7 +185,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
 
         Spacer(Modifier.height(10.dp))
 
-        // --- Frequency generator tile (no Slider; simple +/- and presets) ---
+        // --- Frequency generator tile ---
         InfoTile(title = "Frequency Generator") {
             Text("Sine tone • ${freq.roundToInt()} Hz", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
             Spacer(Modifier.height(6.dp))
@@ -196,13 +199,8 @@ fun CompassPage(readings: Map<String, FloatArray>) {
                     if (playing) tonePlayer.setFrequency(freq)
                 }
                 ActionChip(if (playing) "Stop" else "Start") {
-                    if (playing) {
-                        tonePlayer.stop()
-                        playing = false
-                    } else {
-                        tonePlayer.start(freq)
-                        playing = true
-                    }
+                    if (playing) { tonePlayer.stop(); playing = false }
+                    else { tonePlayer.start(freq); playing = true }
                 }
                 ActionChip("+10 Hz") {
                     freq = (freq + 10f).coerceIn(100f, 1000f)
@@ -243,7 +241,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
     DisposableEffect(Unit) { onDispose { tonePlayer.stop() } }
 }
 
-/* ===================== Building blocks (local, UI only) ===================== */
+/* ---------- small UI bits local to this page ---------- */
 
 @Composable
 private fun InfoTile(title: String, content: @Composable ColumnScope.() -> Unit) {
@@ -320,25 +318,19 @@ private fun ActionChip(label: String, onClick: () -> Unit) {
     }
 }
 
-/* ===================== Local tone player ===================== */
+/* ---------- tiny tone player (looped static buffer) ---------- */
 
 private class TonePlayer {
     private var track: AudioTrack? = null
-    private var currentFreq = 432f
 
     fun start(freq: Float) {
         stop()
-        currentFreq = freq
         track = buildSineTrack(freq)
         track?.play()
     }
 
     fun setFrequency(freq: Float) {
-        if (track?.playState == AudioTrack.PLAYSTATE_PLAYING) {
-            start(freq) // rebuild for new frequency (simple & safe)
-        } else {
-            currentFreq = freq
-        }
+        if (track?.playState == AudioTrack.PLAYSTATE_PLAYING) start(freq)
     }
 
     fun stop() {
@@ -352,10 +344,10 @@ private class TonePlayer {
         val durationSec = 0.25f
         val samples = (sampleRate * durationSec).toInt().coerceAtLeast(256)
         val buf = ShortArray(samples)
-        val twoPiF = 2.0 * Math.PI * freq / sampleRate
+        val twoPiOverFs = (2.0 * PI / sampleRate).toFloat()
         for (i in 0 until samples) {
-            val s = sin(twoPiF * i).toFloat()
-            buf[i] = (s * 32767).toInt().toShort()
+            val s = sin(twoPiOverFs * freq * i).toFloat()
+            buf[i] = (s * 32767f).toInt().toShort()
         }
 
         val format = AudioFormat.Builder()
@@ -375,7 +367,7 @@ private class TonePlayer {
             .setBufferSizeInBytes(buf.size * 2)
             .build().apply {
                 write(buf, 0, buf.size)
-                setLoopPoints(0, buf.size, -1) // loop whole buffer
+                setLoopPoints(0, buf.size, -1)
             }
     }
 }
