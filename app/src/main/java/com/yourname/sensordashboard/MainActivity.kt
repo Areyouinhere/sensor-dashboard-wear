@@ -635,3 +635,12 @@ private fun ToggleRow(label: String, checked: Boolean, onToggle: (Boolean) -> Un
         }
     }
 }
+    // ===== Utilities (canonical helpers; keep only one copy project-wide) =====
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
+
+fun magnitude(v: FloatArray): Float = sqrt(v.fold(0f) { s, x -> s + x * x })
+fun fmtPct(v: Float): String = "${(v.coerceIn(0f, 1f) * 100f).roundToInt()}%"
+fun fmtMs(v: Float): String = "${v.roundToInt()} ms"
+
+}
