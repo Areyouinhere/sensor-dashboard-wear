@@ -1,95 +1,98 @@
 package com.yourname.sensordashboard
 
+
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.math.abs
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 
+
 /**
- * Tiny rolling baselines + load tracker kept in memory while the app is open.
- * No storage or Samsung Health required.
- */
+* Coherence / Readiness model with HRV banding, soft-knee mixing,
+* motion-gated confidence, and short-term pulse amplitude.
+*/
 object CompassModel {
 
-    // 21-sample rolling stats (approx 10–30s cadence via pushes)
-    private val hrWindow  = Rolling(21)
-    private val hrvWindow = Rolling(21)
 
-    // movement "micro load" bucket -> rolls into daily-ish ACWR-lite
-    private var microLoad: Float = 0f
-    private val acuteWindow = Rolling(7)   // last 7 buckets
-    private val chronicWindow = Rolling(28) // last 28 buckets (weekly averaged in logic)
+// 21-sample rolling windows (10–30s depending on push cadence)
+private val hrWindow = Rolling(21)
+private val hrvWindow = Rolling(21)
+private val accelWin = Rolling(21)
+private val gyroWin = Rolling(21)
+private val lightWin = Rolling(21)
 
-    fun pushHR(bpm: Float) {
-        if (bpm.isFinite() && bpm > 0f) hrWindow.push(bpm)
-    }
-    fun pushHRV(rmssdMs: Float) {
-        if (rmssdMs.isFinite() && rmssdMs > 0f) hrvWindow.push(rmssdMs)
-    }
 
-    fun addMicroLoad(m: Float) {
-        // linear accel magnitude spikes add a bit, clamped to keep sane
-        if (!m.isFinite()) return
-        microLoad = (microLoad + min(m, 1.5f)).coerceAtMost(500f)
-    }
+// Micro load bucket → ACWR-lite
+private var microLoad: Float = 0f
+private val acuteWindow = Rolling(7)
+private val chronicWindow = Rolling(28)
 
-    fun notifySessionReset() {
-        // roll current micro bucket into acute/chronic and zero it
-        acuteWindow.push(microLoad)
-        chronicWindow.push(microLoad)
-        microLoad = 0f
-    }
 
-    /** 0..1 readiness, and "GREEN|YELLOW|RED" label */
-    fun readiness(): Pair<Float, String> {
-        val hrMu  = hrWindow.mean()
-        val hrvMu = hrvWindow.mean()
+// Exposed for Moment Signature Pulse (0..1)
+val pulseSignal = MutableStateFlow(0f)
 
-        // heuristic center values (personalize quickly as window fills)
-        val hrCenter = if (hrMu > 0f) hrMu else 65f
-        val hrvMax   = if (hrvMu > 0f) max(60f, hrvMu*1.4f) else 60f
 
-        val hrLatest  = hrWindow.latest() ?: hrCenter
-        val hrvLatest = hrvWindow.latest() ?: 0f
+fun pushHR(bpm: Float) { if (bpm.isFinite() && bpm > 0f) hrWindow.push(bpm) }
+fun pushHRV(rmssdMs: Float) { if (rmssdMs.isFinite() && rmssdMs > 0f) hrvWindow.push(rmssdMs) }
 
-        // 0..1 scores
-        val hrScore  = bandScore(hrLatest, center = hrCenter, halfSpan = 10f) // best near center
-        val hrvScore = (hrvLatest / hrvMax).coerceIn(0f, 1f)
 
-        // ACWR-lite: acute / chronic (chronic ~ average of last 28)
-        val acute = acuteWindow.sum()
-        val chronicAvg = (chronicWindow.sum() / max(1f, chronicWindow.count().toFloat())) // per "bucket"
-        val acwr = if (chronicAvg > 0f) (acute / (chronicAvg * 7f)).coerceIn(0f, 3f) else 1f
-        val acwrScore = when {
-            acwr in 0.8f..1.3f -> 1f
-            acwr < 0.8f        -> 0.6f
-            else               -> 0.6f - min(0.4f, (acwr - 1.3f)) // degrade if too high
-        }.coerceIn(0f,1f)
+fun addMicroLoad(m: Float) {
+if (!m.isFinite()) return
+accelWin.push(m)
+microLoad = (microLoad + min(m, 1.5f)).coerceAtMost(500f)
+// moment pulse from accel deltas + light changes + HRV change
+val hrvs = hrvWindow.deltaNorm()
+val accs = accelWin.deltaNorm()
+val lights = lightWin.deltaNorm()
+val pulse = (0.5f*hrvs + 0.3f*accs + 0.2f*lights).coerceIn(0f,1f)
+pulseSignal.value = pulse
+}
 
-        val readiness = (0.45f*hrvScore + 0.35f*hrScore + 0.20f*acwrScore).coerceIn(0f,1f)
-        val label = when {
-            readiness >= 0.66f -> "GREEN"
-            readiness >= 0.40f -> "YELLOW"
-            else -> "RED"
-        }
-        return readiness to label
-    }
 
-    private fun bandScore(value: Float, center: Float, halfSpan: Float): Float {
-        val dist = abs(value - center)
-        val s = 1f - (dist / halfSpan).coerceIn(0f, 1f)
-        return 0.7f*s + 0.3f*(s*s)
-    }
+fun pushGyroNorm(g: Float) { if (g.isFinite()) gyroWin.push(g) }
+fun pushLight(lux: Float) { if (lux.isFinite()) lightWin.push(lux) }
 
-    private class Rolling(private val cap: Int) {
-        private val buf = ArrayList<Float>(cap)
-        fun push(v: Float) {
-            if (!v.isFinite()) return
-            if (buf.size >= cap) buf.removeAt(0)
-            buf.add(v)
-        }
-        fun mean(): Float = if (buf.isEmpty()) 0f else buf.sum() / buf.size
-        fun latest(): Float? = buf.lastOrNull()
-        fun sum(): Float = buf.sum()
-        fun count(): Int = buf.size
-    }
+
+fun notifySessionReset() {
+acuteWindow.push(microLoad)
+chronicWindow.push(microLoad)
+microLoad = 0f
+}
+
+
+data class Composite(val composite: Float, val confidence: Float)
+
+
+/**
+* Composite coherence using banded HRV, HR centering, motion stability,
+* acceleration presence, and environment normalization.
+*/
+fun composite(
+accelMag: Float, gyroMag: Float, hr: Float,
+press: Float, humidity: Float, light: Float, hrv: Float
+): Composite {
+// HR band — centered around personal mean with soft knee
+val hrMu = hrWindow.mean().takeIf { it > 0f } ?: 65f
+val hrScore = bandScore(value = if (hr.isFinite()) hr else hrMu, center = hrMu, halfSpan = 10f)
+
+
+// HRV remodel: peak in an optimal band (triangular w/ soft edges)
+// Define personal band: [low, optLo, optHi, high]
+val hmu = hrvWindow.mean().takeIf { it > 0f } ?: 40f
+val low = max(15f, 0.6f*hmu)
+val optLo = max(25f, 0.9f*hmu)
+val optHi = max(40f, 1.3f*hmu)
+val high = max(70f, 1.8f*hmu)
+val hrvScore = bandedPeak(hrv, low, optLo, optHi, high)
+
+
+// Motion stability → from gyro magnitude (lower is better)
+val motionStability = softKnee(1f - (gyroMag/4f).coerceIn(0f,1f))
+// Movement presence → from accel magnitude (mid is OK, too high lowers)
+val move = softKnee((accelMag/6f).coerceIn(0f,1f))
+val movement = 1f - 0.6f*move // prefer calmer movement for coherence reading
+
+
+// Env balance (pressure around mid; humidity comfortable 35–60; light log-scale)
 }
