@@ -20,12 +20,11 @@ import kotlin.math.min
 
 @Composable
 fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
-    // source signals (safe defaults)
     val accel = readings["Accelerometer"] ?: floatArrayOf(0f, 0f, 0f)
     val gyro  = readings["Gyroscope"]     ?: floatArrayOf(0f, 0f, 0f)
     val hr    = readings["Heart Rate"]?.getOrNull(0) ?: 0f
     val press = readings["Pressure"]?.getOrNull(0)   ?: 1000f
-    val hrv   = HRVHistory.rmssd() // shared in UiBits
+    val hrv   = HRVHistory.rmssd()
 
     val accelMag = magnitude(accel)
     val gyroMag  = magnitude(gyro)
@@ -56,7 +55,6 @@ fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
     val accelPresence    = knee(s[0])
     val envBalance       = knee(1f - abs(s[3]-0.5f)*2f)
 
-    // confidence gating from CompassModel
     val conf by CompassModel.confidence
     val comp by CompassModel.composite
 
@@ -81,17 +79,15 @@ fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
                 val d = r*2f
                 val tl = Offset(cx-r, cy-r)
                 val sz = Size(d,d)
-                // track
                 drawArc(
                     color = Color(0x22,0xFF,0xFF),
                     startAngle = -90f, sweepAngle = 360f, useCenter = false,
                     topLeft = tl, size = sz,
                     style = Stroke(8f, cap = StrokeCap.Round)
                 )
-                // intensity scales with confidence
-                val alpha = (0.35f + 0.65f*conf).coerceIn(0f,1f)
+                val alphaC = (0.35f + 0.65f*conf).coerceIn(0f,1f)
                 drawArc(
-                    color = hue.copy(alpha = alpha),
+                    color = hue.copy(alpha = alphaC),
                     startAngle = -90f, sweepAngle = 360f*pct, useCenter = false,
                     topLeft = tl, size = sz,
                     style = Stroke(6f, cap = StrokeCap.Round)
@@ -104,7 +100,6 @@ fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
             ring(3, accelPresence,   Color(0xFF,0xE6,0x88))
             ring(4, envBalance,      Color(0xDD,0xFF,0x99))
 
-            // composite center glow
             val maxR = baseR - 6f
             val coreR = (maxR * (0.35f + 0.65f*comp))
             drawCircle(Color(0x33,0xFF,0xD7,0x00), radius = coreR*1.15f, center = Offset(cx,cy))
