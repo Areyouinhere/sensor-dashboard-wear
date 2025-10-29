@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -21,7 +22,6 @@ import kotlin.math.min
 
 @Composable
 fun CompassPage(readings: Map<String, FloatArray>) {
-    // recompute coherence continuously (lightweight)
     LaunchedEffect(readings.hashCode()) { CompassModel.recompute() }
 
     val comp by CompassModel.composite
@@ -34,9 +34,7 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         Modifier.fillMaxSize().padding(12.dp)
             .verticalScroll(rememberScrollState())
             .pointerInput(Unit) {
-                detectVerticalDragGestures { _, dragAmount ->
-                    // Swipe-up micro-trend expose: if dragAmount < 0 show trend (no state needed, kept always visible)
-                }
+                detectVerticalDragGestures { _, _ -> /* sparkline is always visible for now */ }
             }
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -52,19 +50,15 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         }
         Spacer(Modifier.height(6.dp)); DividerLine(); Spacer(Modifier.height(8.dp))
 
-        // Big dial
         Canvas(Modifier.fillMaxWidth().height(160.dp)) {
             val w = size.width; val h = size.height
             val cx = w/2f; val cy = h/2f
             val r  = min(w,h)*0.42f
 
-            // Aura from Micro-Weather (MainActivity supplies via ambient fields; here we show pulse)
             val pulseAlpha = (0.15f + 0.35f*pulse).coerceIn(0f,0.6f)
             drawCircle(Color(0xFF,0xD7,0x00).copy(alpha=pulseAlpha), radius = r*1.05f, center = Offset(cx,cy))
 
-            // Dial track
             drawCircle(Color(0x22,0xFF,0xFF), radius = r, center = Offset(cx,cy))
-            // Fill proportional to coherence
             val angle = 360f * comp
             drawArc(
                 color = Color(0xFF,0xD7,0x00),
@@ -72,7 +66,6 @@ fun CompassPage(readings: Map<String, FloatArray>) {
                 topLeft = Offset(cx-r, cy-r), size = androidx.compose.ui.geometry.Size(r*2, r*2),
                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = 10f)
             )
-            // Confidence ring
             drawCircle(Color(0x66,0xFF,0xFF).copy(alpha=(0.2f+0.6f*conf)), radius = r*0.8f, center = Offset(cx,cy))
         }
 
@@ -80,7 +73,6 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         Text("Composite: ${fmtPct(comp)} • Confidence: ${fmtPct(conf)}", fontSize = 12.sp, color = Color(0xCC,0xFF,0xFF))
         Spacer(Modifier.height(8.dp))
 
-        // Micro-trend sparkline (last few minutes, no DB)
         Text("Recent Trend", fontSize = 12.sp)
         Canvas(Modifier.fillMaxWidth().height(42.dp)) {
             val w = size.width; val h = size.height
