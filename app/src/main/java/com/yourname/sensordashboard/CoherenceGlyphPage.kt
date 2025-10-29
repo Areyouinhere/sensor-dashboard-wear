@@ -5,13 +5,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Text
@@ -20,14 +20,12 @@ import kotlin.math.min
 
 @Composable
 fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
+    // Pull essentials
     val accel = readings["Accelerometer"] ?: floatArrayOf(0f, 0f, 0f)
     val gyro  = readings["Gyroscope"]     ?: floatArrayOf(0f, 0f, 0f)
     val hr    = readings["Heart Rate"]?.getOrNull(0) ?: 0f
     val press = readings["Pressure"]?.getOrNull(0)   ?: 1000f
     val hrv   = HRVHistory.rmssd()
-
-    val accelMag = magnitude(accel)
-    val gyroMag  = magnitude(gyro)
 
     fun soft01(x: Float) = x.coerceIn(0f, 1f)
     fun knee(x: Float, k: Float = 0.6f): Float {
@@ -35,6 +33,8 @@ fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
         return if (t < k) t/k*0.7f else 0.7f + (t-k)/(1f-k)*0.3f
     }
 
+    val accelMag = magnitude(accel)
+    val gyroMag  = magnitude(gyro)
     val nAccel   = soft01(accelMag / 6f)
     val nGyro    = soft01(gyroMag  / 4f)
     val hrMid    = 65f
@@ -55,16 +55,18 @@ fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
     val accelPresence    = knee(s[0])
     val envBalance       = knee(1f - abs(s[3]-0.5f)*2f)
 
-    val conf by CompassModel.confidence
-    val comp by CompassModel.composite
+    // Composite coherence (weighted)
+    val composite = (0.35f*hrvPresence + 0.25f*hrPresence + 0.2f*motionStability + 0.1f*accelPresence + 0.1f*envBalance)
+        .coerceIn(0f,1f)
 
     Column(
         Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())
     ) {
         Text(
             "Coherence",
+            fontWeight = FontWeight.Bold,
             fontSize = 18.sp,
-            modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally)
+            modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(4.dp)); DividerLine(); Spacer(Modifier.height(8.dp))
 
@@ -74,46 +76,52 @@ fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
             val baseR = min(size.width,size.height)*0.26f
             val gap = 14f
 
-            fun ring(idx: Int, pct: Float, hue: Color) {
+            fun ring(idx: Int, pct: Float, glow: Color, core: Color) {
                 val r = baseR + gap*idx
                 val d = r*2f
                 val tl = Offset(cx-r, cy-r)
                 val sz = Size(d,d)
+                // track
                 drawArc(
                     color = Color(0x22,0xFF,0xFF),
                     startAngle = -90f, sweepAngle = 360f, useCenter = false,
-                    topLeft = tl, size = sz,
-                    style = Stroke(8f, cap = StrokeCap.Round)
+                    topLeft = tl, size = sz, style = Stroke(8f, cap = StrokeCap.Round)
                 )
-                val alphaC = (0.35f + 0.65f*conf).coerceIn(0f,1f)
+                // glow
                 drawArc(
-                    color = hue.copy(alpha = alphaC),
+                    color = glow,
                     startAngle = -90f, sweepAngle = 360f*pct, useCenter = false,
-                    topLeft = tl, size = sz,
-                    style = Stroke(6f, cap = StrokeCap.Round)
+                    topLeft = tl, size = sz, style = Stroke(10f, cap = StrokeCap.Round)
+                )
+                // core
+                drawArc(
+                    color = core,
+                    startAngle = -90f, sweepAngle = (360f*pct).coerceAtLeast(6f), useCenter = false,
+                    topLeft = tl, size = sz, style = Stroke(5f, cap = StrokeCap.Round)
                 )
             }
 
-            ring(0, hrvPresence,     Color(0xFF,0xCC,0x66))
-            ring(1, hrPresence,      Color(0xFF,0xE0,0x80))
-            ring(2, motionStability, Color(0xAA,0xFF,0xFF))
-            ring(3, accelPresence,   Color(0xFF,0xE6,0x88))
-            ring(4, envBalance,      Color(0xDD,0xFF,0x99))
+            ring(0, hrvPresence,     Color(0x55,0xFF,0xAA), Color(0xFF,0xCC,0x66))
+            ring(1, hrPresence,      Color(0x66,0x80,0xFF), Color(0xFF,0xE0,0x80))
+            ring(2, motionStability, Color(0x55,0xD0,0xFF), Color(0xAA,0xFF,0xFF))
+            ring(3, accelPresence,   Color(0x66,0xFF,0xD7), Color(0xFF,0xE6,0x88))
+            ring(4, envBalance,      Color(0x55,0xFF,0x99), Color(0xDD,0xFF,0x99))
 
+            // composite center glow
             val maxR = baseR - 6f
-            val coreR = (maxR * (0.35f + 0.65f*comp))
+            val coreR = (maxR * (0.35f + 0.65f*composite))
             drawCircle(Color(0x33,0xFF,0xD7,0x00), radius = coreR*1.15f, center = Offset(cx,cy))
             drawCircle(Color(0xFF,0xD7,0x00), radius = coreR*0.75f, center = Offset(cx,cy))
         }
 
         Spacer(Modifier.height(8.dp))
         Text(
-            "HRV ${fmtMs(hrv)} • HR ${hr.toInt()} bpm • Motion ${fmtPct(1f - nGyro)}",
+            "HRV ${fmtMs(hrv)} • HR ${(hr).toInt()} bpm • Motion ${fmtPct(1f - nGyro)}",
             fontSize = 12.sp, color = Color(0xCC,0xFF,0xFF)
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "Accel ${fmt1(nAccel)} • Env ${fmtPct(1f - abs(nP-0.5f)*2f)} • Coherence ${fmtPct(comp)}",
+            "Accel ${fmt1(nAccel)} • Env ${fmtPct(1f - kotlin.math.abs(nP-0.5f)*2f)} • Coherence ${fmtPct(composite)}",
             fontSize = 11.sp, color = Color(0x99,0xFF,0xFF)
         )
     }
