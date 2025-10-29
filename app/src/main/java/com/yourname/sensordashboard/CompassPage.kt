@@ -1,174 +1,127 @@
 package com.yourname.sensordashboard
 
-import android.media.AudioManager
-import android.media.ToneGenerator
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Text
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlin.math.abs
 import kotlin.math.min
 
 @Composable
-fun CompassPage(readings: Map<String, FloatArray>) {
-    val composite = CompassModel.composite.value
-    val grounded  = CompassModel.grounded.value
-    val conf      = CompassModel.hrConfidence()
+fun CoherenceGlyphPage(readings: Map<String, FloatArray>) {
+    val accel = readings["Accelerometer"] ?: floatArrayOf(0f,0f,0f)
+    val gyro  = readings["Gyroscope"]     ?: floatArrayOf(0f,0f,0f)
+    val hr    = readings["Heart Rate"]?.getOrNull(0) ?: 0f
+    val press = readings["Pressure"]?.getOrNull(0)   ?: 1000f
+    val hrv   = HRVHistory.rmssd()
+
+    fun soft01(x: Float) = x.coerceIn(0f, 1f)
+    fun knee(x: Float, k: Float = 0.6f): Float {
+        val t = x.coerceIn(0f,1f)
+        return if (t < k) t/k*0.7f else 0.7f + (t-k)/(1f-k)*0.3f
+    }
+
+    val accelMag = magnitude(accel)
+    val gyroMag  = magnitude(gyro)
+    val nAccel   = soft01(accelMag / 6f)
+    val nGyro    = soft01(gyroMag  / 4f)
+    val hrMid    = 65f
+    val hrSpan   = 50f
+    val nHR      = soft01(0.5f + (hr - hrMid)/(2f*hrSpan))
+    val nP       = soft01((press - 980f)/70f)
+    val nHRV     = soft01(hrv/80f)
+
+    // EMA smoothing
+    val ema = remember { mutableStateOf(floatArrayOf(nAccel, nGyro, nHR, nP, nHRV)) }
+    val alpha = 0.12f
+    val target = floatArrayOf(nAccel, nGyro, nHR, nP, nHRV)
+    val s = FloatArray(5) { i -> ema.value[i] + alpha*(target[i]-ema.value[i]) }
+    ema.value = s
+
+    val hrvPresence      = knee(s[4])
+    val hrPresence       = knee(1f - abs(s[2]-0.5f)*2f)
+    val motionStability  = knee(1f - s[1])
+    val accelPresence    = knee(s[0])
+    val envBalance       = knee(1f - abs(s[3]-0.5f)*2f)
+    val composite = (0.35f*hrvPresence + 0.25f*hrPresence + 0.2f*motionStability +
+            0.1f*accelPresence + 0.1f*envBalance).coerceIn(0f,1f)
+
+    // Local "confidence" (motion-gated): more motion -> lower confidence
+    val conf = (1f - nGyro).coerceIn(0.1f, 1f)
 
     Column(
-        Modifier.fillMaxSize().padding(12.dp).verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally
+        Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())
     ) {
-        Text("Coherence Compass", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("Coherence", fontWeight = FontWeight.Bold, fontSize = 18.sp,
+            modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(4.dp)); DividerLine(); Spacer(Modifier.height(8.dp))
 
-        // Center dial with composite + grounded halo
-        Canvas(Modifier.fillMaxWidth().height(160.dp)) {
+        Canvas(Modifier.fillMaxWidth().height(176.dp)) {
             val cx = size.width/2f
             val cy = size.height/2f
-            val r = min(size.width, size.height)*0.34f
+            val baseR = min(size.width,size.height)*0.26f
+            val gap = 14f
 
-            // grounded halo
-            if (grounded) {
-                drawCircle(Color(0x44,0xE0,0xFF), radius = r*1.1f, center = Offset(cx,cy))
+            fun ring(idx: Int, pct: Float, glow: Color, core: Color) {
+                val r = baseR + gap*idx
+                val d = r*2f
+                val tl = Offset(cx-r, cy-r)
+                val sz = Size(d,d)
+                // track
+                drawArc(
+                    color = Color(0x22,0xFF,0xFF),
+                    startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                    topLeft = tl, size = sz, style = Stroke(width = 8f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                )
+                // glow (confidence gates alpha)
+                drawArc(
+                    color = glow.copy(alpha = 0.6f * conf + 0.2f),
+                    startAngle = -90f, sweepAngle = 360f*pct, useCenter = false,
+                    topLeft = tl, size = sz, style = Stroke(width = 10f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                )
+                // core
+                drawArc(
+                    color = core,
+                    startAngle = -90f, sweepAngle = (360f*pct).coerceAtLeast(6f), useCenter = false,
+                    topLeft = tl, size = sz, style = Stroke(width = 5f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                )
             }
 
-            // pulse ring from model’s moment signature
-            val pulse = CompassModel.momentPulse.value // 0..1
-            val ringR = r * (0.85f + 0.1f*pulse)
-            drawCircle(Color(0x22,0xFF,0xFF), radius = ringR+6f, center = Offset(cx,cy))
-            drawCircle(Color(0xFF,0xD7,0x00), radius = ringR, center = Offset(cx,cy))
-        }
+            ring(0, hrvPresence,     Color(0x55,0xFF,0xAA), Color(0xFF,0xCC,0x66))
+            ring(1, hrPresence,      Color(0x66,0x80,0xFF), Color(0xFF,0xE0,0x80))
+            ring(2, motionStability, Color(0x55,0xD0,0xFF), Color(0xAA,0xFF,0xFF))
+            ring(3, accelPresence,   Color(0x66,0xFF,0xD7), Color(0xFF,0xE6,0x88))
+            ring(4, envBalance,      Color(0x55,0xFF,0x99), Color(0xDD,0xFF,0x99))
 
-        // Center text (restored)
-        Text("Composite ${fmtPct(composite)}", fontSize = 14.sp, color = Color(0xEE,0xFF,0xFF))
-        val trendSpark = CompassModel.sparkline() // 0..1 list last few minutes
-        if (trendSpark.isNotEmpty()) {
-            SparklineRow(trendSpark, label = "Trend (3–5 min)")
-        }
-
-        Spacer(Modifier.height(8.dp))
-        DividerLine()
-        Spacer(Modifier.height(8.dp))
-
-        // Quick readouts (restored)
-        val hrv = HRVHistory.rmssd()
-        val hr  = readings["Heart Rate"]?.getOrNull(0) ?: 0f
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("HRV ${fmtMs(hrv)}", fontSize = 12.sp)
-            Text("HR ${hr.toInt()} bpm", fontSize = 12.sp)
-            Text("Conf ${fmtPct(conf)}", fontSize = 12.sp)
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // Notes (restored)
-        var notes by remember { mutableStateOf("") }
-        Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                .background(Color(0x14,0xFF,0xFF)).padding(8.dp)
-        ) {
-            Text("Notes", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-            Spacer(Modifier.height(4.dp))
-            BasicTextField(
-                value = notes,
-                onValueChange = { notes = it },
-                textStyle = TextStyle(color = Color.White, fontSize = 12.sp),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 42.dp)
-            )
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // Tone Generator (restored lightweight)
-        ToneBox()
-    }
-}
-
-@Composable
-private fun SparklineRow(points01: List<Float>, label: String) {
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-            .background(Color(0x10,0xFF,0xFF)).padding(8.dp)
-    ) {
-        Text(label, fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
-        Spacer(Modifier.height(4.dp))
-        Canvas(Modifier.fillMaxWidth().height(40.dp)) {
-            if (points01.size < 2) return@Canvas
-            val w = size.width
-            val h = size.height
-            val step = w / (points01.size - 1)
-            var prev = Offset(0f, h*(1f - points01.first().coerceIn(0f,1f)))
-            for (i in 1 until points01.size) {
-                val x = step * i
-                val y = h*(1f - points01[i].coerceIn(0f,1f))
-                drawLine(Color(0xFF,0xD7,0x00), prev, Offset(x,y), 2f)
-                prev = Offset(x,y)
+            // Center: red → purple → blue gradient sized by composite (toggleable)
+            if (AppSettings.showCenterGlow) {
+                val maxR = baseR - 6f
+                val coreR = (maxR * (0.35f + 0.65f*composite))
+                val shader = Brush.radialGradient(
+                    colors = listOf(Color(0xFF,0x33,0x33), Color(0x99,0x33,0xCC), Color(0x33,0x66,0xFF)),
+                    center = Offset(cx, cy),
+                    radius = coreR
+                )
+                drawCircle(color = Color.White.copy(alpha = 0.06f), radius = coreR * 1.2f, center = Offset(cx, cy))
+                drawCircle(brush = shader, radius = coreR, center = Offset(cx, cy))
             }
         }
-    }
-}
 
-@Composable
-private fun ToneBox() {
-    var on by remember { mutableStateOf(false) }
-    var hz by remember { mutableStateOf(180f) }
-    val tg = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 80) }
-    DisposableEffect(Unit) {
-        onDispose { runCatching { tg.release() } }
-    }
-
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-            .background(Color(0x10,0xFF,0xFF)).padding(8.dp)
-    ) {
-        Text("Tone", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(4.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(if (on) "On" else "Off", fontSize = 12.sp)
-            Text("${hz.toInt()} Hz", fontSize = 12.sp)
-        }
-        Spacer(Modifier.height(6.dp))
-        Box(
-            Modifier.fillMaxWidth().height(36.dp).clip(RoundedCornerShape(8.dp))
-                .background(Color(0x18,0xFF,0xFF))
-                .pointerInput(on, hz) {
-                    detectTapGestures(
-                        onTap = {
-                            on = !on
-                            if (on) tg.startTone(ToneGenerator.TONE_DTMF_5, 150)
-                            else tg.stopTone()
-                        },
-                        onPress = {
-                            // press/hold gently nudges frequency for fun
-                            val start = hz
-                            try {
-                                while (currentEvent?.pressed == true && isActive) {
-                                    hz = (start + ((System.currentTimeMillis() % 1000) / 1000f - 0.5f)*40f)
-                                        .coerceIn(120f, 600f)
-                                    delay(60)
-                                }
-                            } finally {}
-                        }
-                    )
-                }
-        )
+        Spacer(Modifier.height(8.dp))
+        Text("HRV ${fmtMs(hrv)} • HR ${hr.toInt()} bpm • Motion ${fmtPct(1f - nGyro)}",
+            fontSize = 12.sp, color = Color(0xCC,0xFF,0xFF))
+        Text("Accel ${fmt1(nAccel)} • Env ${fmtPct(1f - kotlin.math.abs(nP-0.5f)*2f)} • Coherence ${fmtPct(composite)}",
+            fontSize = 11.sp, color = Color(0x99,0xFF,0xFF))
     }
 }
