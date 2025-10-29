@@ -1,5 +1,6 @@
 package com.yourname.sensordashboard
 
+import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import androidx.compose.animation.core.Animatable
@@ -18,6 +19,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -25,12 +27,12 @@ import androidx.wear.compose.material.Text
 import kotlinx.coroutines.delay
 import kotlin.math.*
 
+/** ---------- Formatting / math helpers ---------- */
 val orientationDegState = mutableStateOf(floatArrayOf(0f,0f,0f))
 val lightScale = AutoScaler(decay = 0.997f, floor = 0.1f, ceil = 40_000f)
 val magScale   = AutoScaler(decay = 0.995f, floor = 5f,   ceil = 150f)
 
 fun magnitude(v: FloatArray): Float = sqrt(v.fold(0f) { s, x -> s + x*x })
-
 fun fmtPct(v: Float): String = "${(v.coerceIn(0f,1f)*100f).roundToInt()}%"
 fun fmtMs(v: Float): String  = "${v.roundToInt()} ms"
 fun fmt1(v: Float): String   = "%.1f".format(v.coerceIn(0f,1f))
@@ -47,6 +49,22 @@ class AutoScaler(private val decay: Float = 0.995f, private val floor: Float = 0
     }
 }
 
+/** ---------- App settings (wired in UI) ---------- */
+object AppSettings {
+    var showParallax by mutableStateOf(true)
+    var showAura by mutableStateOf(true)
+    var showCenterGlow by mutableStateOf(true)
+    var toneEnabled by mutableStateOf(true)
+    var hapticsEnabled by mutableStateOf(true)
+    // page toggles (keep at least one)
+    var showPageDash by mutableStateOf(true)
+    var showPageGlyph by mutableStateOf(true)
+    var showPageCompass by mutableStateOf(true)
+    var showPageSettings by mutableStateOf(true)
+    var showPageAbout by mutableStateOf(true)
+}
+
+/** ---------- Rolling history buffers ---------- */
 object SensorHistory {
     val gyroX = mutableStateListOf<Float>()
     val gyroY = mutableStateListOf<Float>()
@@ -63,6 +81,7 @@ object SensorHistory {
     fun pushLight(l: Float) = push(light, l)
 }
 
+/** ---------- Small UI bits ---------- */
 @Composable fun DividerLine(mod: Modifier = Modifier) {
     Box(mod.fillMaxWidth().height(1.dp).background(Color(0x22,0xFF,0xFF)))
 }
@@ -77,6 +96,7 @@ object SensorHistory {
     Text("$label${".".repeat(dots)}", fontSize = 12.sp, color = Color.Gray.copy(alpha = alpha.value))
 }
 
+/** ---------- Restored visuals ---------- */
 @Composable
 fun NeonHeatBarNormalized(norm: Float) {
     val anim = remember { Animatable(0f) }
@@ -84,8 +104,11 @@ fun NeonHeatBarNormalized(norm: Float) {
     val track = Color(0x33,0xFF,0xFF); val glow = Color(0x66,0x00,0xEA); val core = Color(0xFF,0xD7,0x00)
     Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(track)) {
         Box(Modifier.fillMaxWidth(anim.value).height(10.dp).background(glow.copy(alpha = 0.6f)))
-        Box(Modifier.fillMaxWidth((anim.value*0.98f).coerceAtLeast(0.02f)).height(6.dp)
-            .padding(vertical = 2.dp).clip(RoundedCornerShape(3.dp)).background(core))
+        Box(
+            Modifier.fillMaxWidth((anim.value*0.98f).coerceAtLeast(0.02f))
+                .height(6.dp).padding(vertical = 2.dp)
+                .clip(RoundedCornerShape(3.dp)).background(core)
+        )
     }
 }
 
@@ -118,17 +141,21 @@ fun GravityTuner(values: FloatArray) {
     val norm = ((g - (center - span/2f)) / span).coerceIn(0f, 1f)
     Canvas(Modifier.fillMaxWidth().height(54.dp)) {
         val w = size.width; val h = size.height; val cx = w/2f; val cy = h*0.65f; val r = min(w,h)*0.45f
-        drawArc(Color(0x22,0xFF,0xFF), 180f, 180f, false, Offset(cx-r, cy-r), Size(r*2, r*2), Stroke(6f, cap = StrokeCap.Round))
+        drawArc(
+            color = Color(0x22,0xFF,0xFF),
+            startAngle = 180f, sweepAngle = 180f, useCenter = false,
+            topLeft = Offset(cx-r, cy-r), size = Size(r*2, r*2),
+            style = Stroke(width = 6f, cap = StrokeCap.Round)
+        )
         val ang = 180f + 180f * norm; val rad = ang * (Math.PI/180f).toFloat()
         val nx = cx + cos(rad)*r; val ny = cy + sin(rad)*r
         drawLine(Color(0xFF,0xD7,0x00), Offset(cx,cy), Offset(nx,ny), 4f)
     }
 }
 
-@Composable
-fun StepsRow(raw: Float, session: Float) {
+@Composable fun StepsRow(raw: Float, session: Float) {
     Column {
-        Text("Raw: ${raw.toInt()} • Session: ${session.toInt()} (tap reset in old build)", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
+        Text("Raw: ${raw.toInt()} • Session: ${session.toInt()}", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
         NeonHeatBarNormalized((session / 12_000f).coerceIn(0f,1f))
     }
 }
@@ -141,10 +168,15 @@ fun CenteredZeroBar(value: Float, visualRange: Float) {
     val track = Color(0x22,0xFF,0xFF); val negGlow = Color(0x66,0x00,0xEA); val posGlow = Color(0xFF,0xD7,0x00)
     Box(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(track)) {
         val half = 0.5f; val amt = abs(anim.value)*half
-        Box(Modifier.fillMaxWidth(half + amt).height(14.dp).clip(RoundedCornerShape(7.dp))
-            .background(if (anim.value >= 0f) posGlow.copy(alpha=0.35f) else negGlow.copy(alpha=0.35f)))
-        Box(Modifier.fillMaxWidth(half + amt*0.92f).height(10.dp).padding(vertical=2.dp)
-            .clip(RoundedCornerShape(5.dp)).background(if (anim.value >= 0f) posGlow else negGlow))
+        Box(
+            Modifier.fillMaxWidth(half + amt).height(14.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(if (anim.value >= 0f) posGlow.copy(alpha=0.35f) else negGlow.copy(alpha=0.35f))
+        )
+        Box(
+            Modifier.fillMaxWidth(half + amt*0.92f).height(10.dp).padding(vertical=2.dp)
+                .clip(RoundedCornerShape(5.dp)).background(if (anim.value >= 0f) posGlow else negGlow)
+        )
     }
 }
 
@@ -182,30 +214,33 @@ fun MagneticDial(heading: Float, strengthNorm: Float) {
     Canvas(Modifier.fillMaxWidth().height(72.dp)) {
         val cx = size.width/2f; val cy = size.height/2f
         val r = min(size.width, size.height)*0.42f
-        // ring
-        drawArc(Color(0x22,0xFF,0xFF), -90f, 360f, false, Offset(cx-r, cy-r), Size(r*2, r*2),
-            Stroke(6f, cap = StrokeCap.Round))
-        // needle
+        drawArc(
+            color = Color(0x22,0xFF,0xFF),
+            startAngle = -90f, sweepAngle = 360f, useCenter = false,
+            topLeft = Offset(cx-r, cy-r), size = Size(r*2, r*2),
+            style = Stroke(width = 6f, cap = StrokeCap.Round)
+        )
         val ang = ((heading + 360f) % 360f) - 90f
         val rad = ang * (Math.PI/180f).toFloat()
         val nx = cx + cos(rad)*r; val ny = cy + sin(rad)*r
         val col = Color(0xFF,0xD7,0x00)
         drawLine(col, Offset(cx,cy), Offset(nx,ny), 4f)
-        // strength bar
         val bar = strengthNorm.coerceIn(0f,1f)
         drawLine(Color(0x33,0xFF,0xFF), Offset(cx-r, cy+r+6f), Offset(cx+r, cy+r+6f), 6f)
         drawLine(Color(0x66,0x00,0xEA), Offset(cx-r, cy+r+6f), Offset(cx-r + (2*r)*bar, cy+r+6f), 6f)
     }
 }
 
-@Composable
-fun HeartPulse(bpm: Float) {
+@Composable fun HeartPulse(bpm: Float) {
     val t = (bpm.coerceIn(30f, 200f) - 30f) / 170f
     NeonHeatBarNormalized(t)
 }
 
+/** Sensor info header uses LocalContext to obtain SensorManager (avoids needing a captured instance) */
 @Composable
-fun SensorInfoHeader(name: String, sensorManager: SensorManager) {
+fun SensorInfoHeader(name: String) {
+    val ctx = LocalContext.current
+    val sm = remember(ctx) { ctx.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
     var open by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -228,7 +263,7 @@ fun SensorInfoHeader(name: String, sensorManager: SensorManager) {
                 "Step Counter" -> Sensor.TYPE_STEP_COUNTER
                 else -> -1
             }
-            val s = if (type != -1) sensorManager.getDefaultSensor(type) else null
+            val s = if (type != -1) sm.getDefaultSensor(type) else null
             Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 6.dp)) {
                 Text(s?.name ?: "—", fontSize = 10.sp, color = Color(0xCC,0xFF,0xFF))
                 Text("Vendor: ${s?.vendor ?: "—"}  Ver: ${s?.version ?: "—"}", fontSize = 10.sp, color = Color(0x99,0xFF,0xFF))
@@ -239,8 +274,10 @@ fun SensorInfoHeader(name: String, sensorManager: SensorManager) {
     }
 }
 
+/** Background grid */
 @Composable
 fun MicrogridParallax() {
+    if (!AppSettings.showParallax) return
     var phase by remember { mutableStateOf(0f) }
     LaunchedEffect(Unit) { while (true) { delay(24L); phase = (phase + 0.6f) % 20f } }
     Canvas(Modifier.fillMaxSize()) {
