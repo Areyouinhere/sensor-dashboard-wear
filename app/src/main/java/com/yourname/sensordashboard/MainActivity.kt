@@ -11,7 +11,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+- import androidx.compose.foundation.layout.*
++ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
@@ -51,10 +52,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 Box(
                     Modifier.fillMaxSize()
                         .padding(WindowInsets.safeDrawing.asPaddingValues())
-                        .background(envAuraColor())
+                        .background(if (AppSettings.showAura) envAuraColor() else Color.Transparent)
                 ) {
                     MicrogridParallax()
-                    PagerRoot(availableSensors, readings)
+                    PagerRoot(readings)
                 }
             }
         }
@@ -126,7 +127,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             val base = stepBaseline
             if (base == null || raw < base - 10f) {
                 stepBaseline = raw
-                CompassModel.notifySessionReset()
             }
             val session = raw - (stepBaseline ?: raw)
             readings[key] = floatArrayOf(raw, session)
@@ -137,7 +137,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             Sensor.TYPE_ACCELEROMETER -> {
                 lastAccel = event.values.copyOf()
                 SensorHistory.pushAccel(magnitude(event.values))
-                CompassModel.pushAccelMag(magnitude(event.values))
             }
             Sensor.TYPE_MAGNETIC_FIELD -> { lastMag = event.values.copyOf() }
             Sensor.TYPE_GYROSCOPE -> {
@@ -145,7 +144,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 val gy = event.values.getOrNull(1) ?: 0f
                 val gz = event.values.getOrNull(2) ?: 0f
                 SensorHistory.pushGyro(gx, gy, gz)
-                CompassModel.pushGyroMag(sqrt(gx*gx+gy*gy+gz*gz))
             }
             Sensor.TYPE_GRAVITY -> {
                 lastAccel = event.values.copyOf()
@@ -153,28 +151,17 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             }
             Sensor.TYPE_ROTATION_VECTOR -> { lastRotVec = event.values.copyOf() }
             Sensor.TYPE_HEART_BEAT -> { HRVHistory.push(event.values.getOrNull(0) ?: return) }
-            Sensor.TYPE_HEART_RATE -> {
-                val bpm = event.values.getOrNull(0) ?: return
-                HRVHistory.pushFromHR(bpm)
-                CompassModel.pushHR(bpm)
-            }
+            Sensor.TYPE_HEART_RATE -> { HRVHistory.pushFromHR(event.values.getOrNull(0) ?: return) }
             Sensor.TYPE_LIGHT -> {
                 val lux = event.values.getOrNull(0) ?: 0f
                 SensorHistory.pushLight(lux)
-                CompassModel.pushLight(lux)
             }
-            Sensor.TYPE_PRESSURE -> CompassModel.pushPressure(event.values.getOrNull(0) ?: 1000f)
         }
 
         computeOrientationDegrees()?.let { orientationDegState.value = it }
         readings[key] = event.values.copyOf()
 
-        CompassModel.pushHRV(HRVHistory.rmssd())
-        if (event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION) {
-            CompassModel.addMicroLoad(magnitude(event.values))
-        }
-
-        // Gravity anchor
+        // Gravity anchor (visual cue handled on Compass display)
         val ori = orientationDegState.value
         val pitch = abs(ori.getOrNull(1) ?: 90f)
         val roll  = abs(ori.getOrNull(2) ?: 90f)
@@ -182,16 +169,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         val now = System.currentTimeMillis()
         if (isLevel) {
             if (groundedStart == null) groundedStart = now
-            if (!CompassModel.grounded.value && (now - (groundedStart ?: now)) > 2900L) {
-                CompassModel.grounded.value = true
+            if ((now - (groundedStart ?: now)) > 2900L && AppSettings.hapticsEnabled) {
                 vibrate(30)
             }
         } else {
             groundedStart = null
-            CompassModel.grounded.value = false
         }
-
-        CompassModel.recompute()
     }
 
     private fun vibrate(ms: Long) = runCatching {
@@ -221,31 +204,47 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     override fun onDestroy() { super.onDestroy(); sensorManager.unregisterListener(this) }
 }
 
-/** ===== PAGER / PAGES ===== */
+/** ===== Pager / Pages (with Settings wiring) ===== */
 
 @Composable
-private fun PagerRoot(availableSensors: List<String>, readings: Map<String, FloatArray>) {
-    val pagerState = rememberPagerState(pageCount = { 5 })
+private fun PagerRoot(readings: Map<String, FloatArray>) {
+    val pages = remember {
+        mutableStateListOf(
+            "Dashboard", "Glyph", "Compass", "Settings", "About"
+        )
+    }
+    // Apply settings to show/hide pages
+    val enabledFlags = listOf(
+        AppSettings.showPageDash,
+        AppSettings.showPageGlyph,
+        AppSettings.showPageCompass,
+        AppSettings.showPageSettings,
+        AppSettings.showPageAbout
+    )
+    val visiblePages = pages.zip(enabledFlags).filter { it.second }.map { it.first }
+    val pagerState = rememberPagerState(pageCount = { max(1, visiblePages.size) })
+
     Column(Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
             flingBehavior = PagerDefaults.flingBehavior(state = pagerState),
             modifier = Modifier.weight(1f).fillMaxWidth()
-        ) { page ->
-            when (page) {
-                0 -> DashboardPage(availableSensors, readings)
-                1 -> CoherenceGlyphPage(readings)
-                2 -> CompassPage(readings)
-                3 -> SettingsPage()
-                4 -> AboutPage()
+        ) { idx ->
+            when (visiblePages.getOrNull(idx)) {
+                "Dashboard" -> DashboardPage(readings)
+                "Glyph"     -> CoherenceGlyphPage(readings)
+                "Compass"   -> CompassPage(readings)
+                "Settings"  -> SettingsPage()
+                "About"     -> AboutPage()
+                else        -> AboutPage()
             }
         }
-        PagerDots(pagerState.currentPage, 5)
+        PagerDots(pagerState.currentPage, max(1, visiblePages.size))
     }
 }
 
 @Composable private fun PagerDots(current: Int, count: Int) {
-    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.Center) {
+    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Alignment.Center) {
         repeat(count) { i ->
             Box(
                 Modifier.size(if (current == i) 8.dp else 6.dp)
@@ -257,22 +256,23 @@ private fun PagerRoot(availableSensors: List<String>, readings: Map<String, Floa
 }
 
 @Composable
-private fun DashboardPage(availableSensors: List<String>, readings: Map<String, FloatArray>) {
+private fun DashboardPage(readings: Map<String, FloatArray>) {
     val ordered = listOf(
         "Accelerometer","Linear Accel","Gravity","Gyroscope",
         "Rotation Vector","Magnetic","Light","Pressure",
         "Humidity","Ambient Temp","Heart Rate","HRV","Step Counter"
     )
-    val items by remember {
-        derivedStateOf {
-            val base = readings.toMutableMap()
-            base["HRV"] = floatArrayOf(HRVHistory.rmssd())
-            base.entries.sortedWith(
+    val items by remember(readings.keys) {
+        mutableStateOf(
+            buildMap {
+                putAll(readings)
+                put("HRV", floatArrayOf(HRVHistory.rmssd()))
+            }.entries.sortedWith(
                 compareBy(
                     { ordered.indexOf(it.key).let { i -> if (i == -1) Int.MAX_VALUE else i } },
                     { it.key })
             )
-        }
+        )
     }
 
     Column(Modifier.fillMaxSize().padding(10.dp).verticalScroll(rememberScrollState())) {
@@ -283,8 +283,7 @@ private fun DashboardPage(availableSensors: List<String>, readings: Map<String, 
         if (readings.isEmpty()) { WaitingPulseDots(); Spacer(Modifier.height(16.dp)) }
 
         items.forEach { (name, values) ->
-            // Header row with info dropdown
-            SensorInfoHeader(name = name, sensorManager = sensorManager)
+            SensorInfoHeader(name = name)
             val boxed = Modifier.fillMaxWidth()
                 .background(Color(0x10,0xFF,0xFF)).padding(8.dp)
             Box(boxed) {
@@ -333,10 +332,68 @@ private fun DashboardPage(availableSensors: List<String>, readings: Map<String, 
         Text("Settings", fontSize = 18.sp,
             modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally))
         Spacer(Modifier.height(4.dp)); DividerLine(); Spacer(Modifier.height(8.dp))
-        Text("• Toggle pages (stub)")
-        Text("• Font size presets (stub)")
-        Text("• Tone/haptic presets (stub)")
-        Text("• Parallax background (on)")
+
+        Text("Display", fontSize = 12.sp, color = Color(0xCC,0xFF,0xFF))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Parallax"); ToggleChip(AppSettings.showParallax) { AppSettings.showParallax = it }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Aura"); ToggleChip(AppSettings.showAura) { AppSettings.showAura = it }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Center Glow"); ToggleChip(AppSettings.showCenterGlow) { AppSettings.showCenterGlow = it }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text("Feedback", fontSize = 12.sp, color = Color(0xCC,0xFF,0xFF))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Tone"); ToggleChip(AppSettings.toneEnabled) { AppSettings.toneEnabled = it }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Haptics"); ToggleChip(AppSettings.hapticsEnabled) { AppSettings.hapticsEnabled = it }
+        }
+
+        Spacer(Modifier.height(6.dp))
+        Text("Pages", fontSize = 12.sp, color = Color(0xCC,0xFF,0xFF))
+        PageToggle("Dashboard") { AppSettings.showPageDash = it }
+        PageToggle("Glyph") { AppSettings.showPageGlyph = it }
+        PageToggle("Compass") { AppSettings.showPageCompass = it }
+        PageToggle("Settings") { AppSettings.showPageSettings = it }
+        PageToggle("About") { AppSettings.showPageAbout = it }
+        Spacer(Modifier.height(6.dp))
+        Text("Changes apply immediately.", fontSize = 10.sp, color = Color(0x99,0xFF,0xFF))
+    }
+}
+
+@Composable private fun ToggleChip(value: Boolean, onChange: (Boolean)->Unit) {
+    Box(
+        Modifier.width(56.dp).height(26.dp).clip(RoundedCornerShape(13.dp))
+            .background(if (value) Color(0xFF,0xD7,0x00) else Color(0x33,0xFF,0xFF))
+    ) {
+        Box(
+            Modifier.offset(x = if (value) 30.dp else 2.dp, y = 2.dp)
+                .size(22.dp).clip(RoundedCornerShape(11.dp))
+                .background(Color.White)
+                .clickable { onChange(!value) }
+        )
+    }
+}
+
+@Composable private fun PageToggle(label: String, set: (Boolean)->Unit) {
+    var v by remember(label) {
+        mutableStateOf(
+            when(label){
+                "Dashboard"->AppSettings.showPageDash
+                "Glyph"->AppSettings.showPageGlyph
+                "Compass"->AppSettings.showPageCompass
+                "Settings"->AppSettings.showPageSettings
+                "About"->AppSettings.showPageAbout
+                else->true
+            }
+        )
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label)
+        ToggleChip(v) { v = it; set(it) }
     }
 }
 
