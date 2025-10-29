@@ -12,11 +12,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,15 +26,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
-import kotlin.math.PI
-import kotlin.math.absoluteValue
-import kotlin.math.ln
-import kotlin.math.min
-import kotlin.math.sqrt
+import kotlin.math.*
 
-/** ====== ACTIVITY ====== */
 class MainActivity : ComponentActivity(), SensorEventListener {
-
     private lateinit var sensorManager: SensorManager
     private var stepBaseline by mutableStateOf<Float?>(null)
     private var lastAccel: FloatArray? = null
@@ -55,11 +49,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         setContent {
             MaterialTheme {
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
+                    Modifier.fillMaxSize()
                         .padding(WindowInsets.safeDrawing.asPaddingValues())
                         .background(envAuraColor())
                 ) {
+                    MicrogridParallax()
                     PagerRoot(availableSensors, readings)
                 }
             }
@@ -72,7 +66,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         ensurePermissionsThenSubscribe()
     }
 
-    /** Micro-Weather Aura: light+pressure+humidity → soft background wash */
     private fun envAuraColor(): Color {
         val lux = readings["Light"]?.getOrNull(0) ?: 0f
         val p   = readings["Pressure"]?.getOrNull(0) ?: 1000f
@@ -81,40 +74,34 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         val tP   = ((p - 980f)/70f).coerceIn(0f,1f)
         val tRh  = (rh/100f).coerceIn(0f,1f)
         val r = (0.06f + 0.3f*tLux)
-        val g = (0.08f + 0.28f*(1f- kotlin.math.abs(tP-0.5f)*2f))
+        val g = (0.08f + 0.28f*(1f- abs(tP-0.5f)*2f))
         val b = (0.10f + 0.25f*tRh)
         return Color(r, g, b, alpha = 1f).copy(alpha = 0.25f)
     }
 
     private fun ensurePermissionsThenSubscribe() {
         subscribeSensors(registerHeartRate = false)
-
         val needsBody = ContextCompat.checkSelfPermission(
             this, android.Manifest.permission.BODY_SENSORS
         ) != android.content.pm.PackageManager.PERMISSION_GRANTED
         val needsAct = ContextCompat.checkSelfPermission(
             this, android.Manifest.permission.ACTIVITY_RECOGNITION
         ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-
         if (needsBody || needsAct) {
-            permissionLauncher.launch(
-                arrayOf(
-                    android.Manifest.permission.BODY_SENSORS,
-                    android.Manifest.permission.ACTIVITY_RECOGNITION
-                )
-            )
+            permissionLauncher.launch(arrayOf(
+                android.Manifest.permission.BODY_SENSORS,
+                android.Manifest.permission.ACTIVITY_RECOGNITION
+            ))
         } else subscribeSensors(registerHeartRate = true)
     }
 
     private fun subscribeSensors(registerHeartRate: Boolean) {
         sensorManager.unregisterListener(this)
-
         fun reg(type: Int, delay: Int = SensorManager.SENSOR_DELAY_UI) {
             sensorManager.getDefaultSensor(type)?.let { s ->
                 sensorManager.registerListener(this, s, delay)
             }
         }
-
         reg(Sensor.TYPE_ACCELEROMETER)
         reg(Sensor.TYPE_GYROSCOPE)
         reg(Sensor.TYPE_LINEAR_ACCELERATION)
@@ -134,7 +121,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent) {
         val key = labelFor(event.sensor.type)
-
         if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
             val raw = event.values.firstOrNull() ?: 0f
             val base = stepBaseline
@@ -153,27 +139,20 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 SensorHistory.pushAccel(magnitude(event.values))
                 CompassModel.pushAccelMag(magnitude(event.values))
             }
-            Sensor.TYPE_MAGNETIC_FIELD -> {
-                lastMag = event.values.copyOf()
-            }
+            Sensor.TYPE_MAGNETIC_FIELD -> { lastMag = event.values.copyOf() }
             Sensor.TYPE_GYROSCOPE -> {
                 val gx = event.values.getOrNull(0) ?: 0f
                 val gy = event.values.getOrNull(1) ?: 0f
                 val gz = event.values.getOrNull(2) ?: 0f
                 SensorHistory.pushGyro(gx, gy, gz)
-                CompassModel.pushGyroMag(sqrt(gx*gx + gy*gy + gz*gz))
+                CompassModel.pushGyroMag(sqrt(gx*gx+gy*gy+gz*gz))
             }
             Sensor.TYPE_GRAVITY -> {
                 lastAccel = event.values.copyOf()
                 SensorHistory.pushGrav(magnitude(event.values))
             }
-            Sensor.TYPE_ROTATION_VECTOR -> {
-                lastRotVec = event.values.copyOf()
-            }
-            Sensor.TYPE_HEART_BEAT -> {
-                val rr = event.values.getOrNull(0) ?: return
-                HRVHistory.push(rr)
-            }
+            Sensor.TYPE_ROTATION_VECTOR -> { lastRotVec = event.values.copyOf() }
+            Sensor.TYPE_HEART_BEAT -> { HRVHistory.push(event.values.getOrNull(0) ?: return) }
             Sensor.TYPE_HEART_RATE -> {
                 val bpm = event.values.getOrNull(0) ?: return
                 HRVHistory.pushFromHR(bpm)
@@ -190,18 +169,15 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         computeOrientationDegrees()?.let { orientationDegState.value = it }
         readings[key] = event.values.copyOf()
 
-        // drive HRV rolling value into model
         CompassModel.pushHRV(HRVHistory.rmssd())
-
-        // micro-load hint
         if (event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION) {
             CompassModel.addMicroLoad(magnitude(event.values))
         }
 
-        // gravity anchor gesture (±5° level for ~3s)
+        // Gravity anchor
         val ori = orientationDegState.value
-        val pitch = ori.getOrNull(1)?.absoluteValue ?: 90f
-        val roll  = ori.getOrNull(2)?.absoluteValue ?: 90f
+        val pitch = abs(ori.getOrNull(1) ?: 90f)
+        val roll  = abs(ori.getOrNull(2) ?: 90f)
         val isLevel = (pitch <= 5f && roll <= 5f)
         val now = System.currentTimeMillis()
         if (isLevel) {
@@ -215,21 +191,16 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             CompassModel.grounded.value = false
         }
 
-        // recompute composite/pulse
         CompassModel.recompute()
     }
 
-    private fun vibrate(ms: Long) {
-        runCatching {
-            val vib = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-            @Suppress("DEPRECATION") vib.vibrate(ms)
-        }
+    private fun vibrate(ms: Long) = runCatching {
+        val vib = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        @Suppress("DEPRECATION") vib.vibrate(ms)
     }
 
     private fun computeOrientationDegrees(): FloatArray? {
-        val rMat = FloatArray(9)
-        val iMat = FloatArray(9)
-        val ori  = FloatArray(3)
+        val rMat = FloatArray(9); val iMat = FloatArray(9); val ori  = FloatArray(3)
         return when {
             lastRotVec != null -> {
                 SensorManager.getRotationMatrixFromVector(rMat, lastRotVec)
@@ -250,14 +221,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     override fun onDestroy() { super.onDestroy(); sensorManager.unregisterListener(this) }
 }
 
-/** ====== PAGER / PAGES ====== */
+/** ===== PAGER / PAGES ===== */
 
 @Composable
-private fun PagerRoot(
-    availableSensors: List<String>,
-    readings: Map<String, FloatArray>
-) {
-    // 5 pages: 0 Dashboard / 1 Coherence Glyph / 2 Compass / 3 Settings / 4 About
+private fun PagerRoot(availableSensors: List<String>, readings: Map<String, FloatArray>) {
     val pagerState = rememberPagerState(pageCount = { 5 })
     Column(Modifier.fillMaxSize()) {
         HorizontalPager(
@@ -271,29 +238,26 @@ private fun PagerRoot(
                 2 -> CompassPage(readings)
                 3 -> SettingsPage()
                 4 -> AboutPage()
-                else -> CoherenceGlyphPage(readings)
             }
         }
-        Row(
-            Modifier.fillMaxWidth().padding(bottom = 6.dp),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center
-        ) {
-            repeat(5) { i ->
-                Box(
-                    Modifier.size(if (pagerState.currentPage == i) 8.dp else 6.dp)
-                        .background(if (pagerState.currentPage == i) Color(0xFFE0CC00) else Color(0x44FFFFFF))
-                )
-                if (i != 4) Spacer(Modifier.width(6.dp))
-            }
+        PagerDots(pagerState.currentPage, 5)
+    }
+}
+
+@Composable private fun PagerDots(current: Int, count: Int) {
+    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.Center) {
+        repeat(count) { i ->
+            Box(
+                Modifier.size(if (current == i) 8.dp else 6.dp)
+                    .background(if (current == i) Color(0xFFE0CC00) else Color(0x44FFFFFF))
+            )
+            if (i != count - 1) Spacer(Modifier.width(6.dp))
         }
     }
 }
 
 @Composable
-private fun DashboardPage(
-    availableSensors: List<String>,
-    readings: Map<String, FloatArray>
-) {
+private fun DashboardPage(availableSensors: List<String>, readings: Map<String, FloatArray>) {
     val ordered = listOf(
         "Accelerometer","Linear Accel","Gravity","Gyroscope",
         "Rotation Vector","Magnetic","Light","Pressure",
@@ -311,30 +275,19 @@ private fun DashboardPage(
         }
     }
 
-    Column(
-        Modifier.fillMaxSize().padding(10.dp).verticalScroll(rememberScrollState())
-    ) {
+    Column(Modifier.fillMaxSize().padding(10.dp).verticalScroll(rememberScrollState())) {
         Text("Sensor Dashboard", fontSize = 18.sp,
             modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally))
         Spacer(Modifier.height(4.dp)); DividerLine(); Spacer(Modifier.height(8.dp))
 
-        if (readings.isEmpty()) {
-            WaitingPulseDots()
-            Spacer(Modifier.height(16.dp))
-        }
+        if (readings.isEmpty()) { WaitingPulseDots(); Spacer(Modifier.height(16.dp)) }
 
         items.forEach { (name, values) ->
-            androidx.wear.compose.material.Text(
-                name, fontSize = 12.sp,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
-            )
-            val txt = values.joinToString(limit = 3, truncated = "…") { v -> "%.2f".format(v) }
-            Text(txt, fontSize = 10.sp, color = Color(0xAA, 0xFF, 0xFF))
-            Box(
-                Modifier.fillMaxWidth()
-                    .background(Color(0x10, 0xFF, 0xFF))
-                    .padding(8.dp)
-            ) {
+            // Header row with info dropdown
+            SensorInfoHeader(name = name, sensorManager = sensorManager)
+            val boxed = Modifier.fillMaxWidth()
+                .background(Color(0x10,0xFF,0xFF)).padding(8.dp)
+            Box(boxed) {
                 when (name) {
                     "Gyroscope" -> GyroWaveform(SensorHistory.gyroX, SensorHistory.gyroY, SensorHistory.gyroZ)
                     "Gravity"   -> GravityTuner(values)
@@ -353,10 +306,10 @@ private fun DashboardPage(
                         val hz = values.getOrNull(2) ?: 0f
                         val mag = sqrt(hx*hx + hy*hy + hz*hz)
                         val heading = orientationDegState.value.getOrNull(0) ?: 0f
-                        Text("Heading ${heading.toInt()}° • ${"%.1f".format(mag)} µT", fontSize = 11.sp)
+                        MagneticDial(heading = heading, strengthNorm = magScale.norm(mag))
                     }
                     "Light" -> InverseSquareLight(values.getOrNull(0) ?: 0f)
-                    "Heart Rate" -> CenteredZeroBar((values.getOrNull(0) ?: 0f) - 65f, visualRange = 50f)
+                    "Heart Rate" -> HeartPulse(values.getOrNull(0) ?: 0f)
                     "HRV" -> CenteredZeroBar((values.getOrNull(0) ?: 0f) - 50f, visualRange = 80f)
                     "Step Counter" -> {
                         val raw = values.getOrNull(0) ?: 0f
@@ -366,7 +319,7 @@ private fun DashboardPage(
                     else -> NeonHeatBarNormalized((magnitude(values)/50f).coerceIn(0f,1f))
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
         }
 
         Spacer(Modifier.height(8.dp))
@@ -380,10 +333,10 @@ private fun DashboardPage(
         Text("Settings", fontSize = 18.sp,
             modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally))
         Spacer(Modifier.height(4.dp)); DividerLine(); Spacer(Modifier.height(8.dp))
-        Text("• Toggle pages (coming soon)")
-        Text("• Font size presets (coming soon)")
-        Text("• Tone/haptic presets (coming soon)")
-        Text("• Parallax background (coming soon)")
+        Text("• Toggle pages (stub)")
+        Text("• Font size presets (stub)")
+        Text("• Tone/haptic presets (stub)")
+        Text("• Parallax background (on)")
     }
 }
 
@@ -394,11 +347,10 @@ private fun DashboardPage(
         Text("Galaxy Watch 7 Sensor Dashboard")
         Text("Coherence Engine — field node")
         Spacer(Modifier.height(8.dp))
-        Text("Built with love by Jason + Caelo")
+        Text("Built by Jason + Caelo")
     }
 }
 
-/** ====== LABELS ====== */
 private fun labelFor(type: Int): String = when (type) {
     Sensor.TYPE_ACCELEROMETER       -> "Accelerometer"
     Sensor.TYPE_GYROSCOPE           -> "Gyroscope"
