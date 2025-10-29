@@ -15,17 +15,20 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import kotlin.math.*
 
-/** ====== ACTIVITY ====== */
+// ===== Activity =====
 
 class MainActivity : ComponentActivity(), SensorEventListener {
 
@@ -101,7 +104,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     private fun subscribeSensors(registerHeartRate: Boolean) {
         sensorManager.unregisterListener(this)
-
         fun reg(type: Int, delay: Int = SensorManager.SENSOR_DELAY_UI) {
             sensorManager.getDefaultSensor(type)?.let { s ->
                 sensorManager.registerListener(this, s, delay)
@@ -125,7 +127,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
     }
 
-    override fun onSensorChanged(event: android.hardware.SensorEvent) {
+    override fun onSensorChanged(event: SensorEvent) {
         val key = labelFor(event.sensor.type)
 
         if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
@@ -183,15 +185,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         computeOrientationDegrees()?.let { orientationDegState.value = it }
         readings[key] = event.values.copyOf()
 
-        // drive HRV rolling value
         CompassModel.pushHRV(HRVHistory.rmssd())
 
-        // micro-load hint
         if (event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION) {
             CompassModel.addMicroLoad(magnitude(event.values))
         }
 
-        // gravity anchor gesture (±5° level for ~3s)
         val ori = orientationDegState.value
         val pitch = ori.getOrNull(1)?.absoluteValue ?: 90f
         val roll  = ori.getOrNull(2)?.absoluteValue ?: 90f
@@ -208,7 +207,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             CompassModel.grounded.value = false
         }
 
-        // recompute composite/pulse
         CompassModel.recompute()
     }
 
@@ -243,49 +241,13 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     override fun onDestroy() { super.onDestroy(); sensorManager.unregisterListener(this) }
 }
 
-/** ====== HRV HISTORY (shared) ====== */
-object HRVHistory {
-    private val rrIntervals = mutableStateListOf<Float>() // ms
-    private var lastBeatMs: Long? = null
-
-    fun push(rr: Float, max: Int = 30) {
-        if (rr <= 0) return
-        if (rrIntervals.size >= max) rrIntervals.removeAt(0)
-        rrIntervals.add(rr)
-    }
-
-    fun pushFromHR(bpm: Float) {
-        val now = System.currentTimeMillis()
-        val last = lastBeatMs
-        lastBeatMs = now
-        if (last != null) push((now - last).toFloat())
-        else push(60000f / bpm.coerceAtLeast(30f))
-    }
-
-    fun rmssd(): Float {
-        if (rrIntervals.size < 2) return 0f
-        var sum = 0f
-        for (i in 1 until rrIntervals.size) {
-            val d = rrIntervals[i] - rrIntervals[i - 1]
-            sum += d * d
-        }
-        val raw = sqrt(sum / (rrIntervals.size - 1))
-        return hrvSmooth.filter(raw)
-    }
-    private object hrvSmooth {
-        private var last = 0f
-        fun filter(v: Float, alpha: Float = 0.15f): Float { last += alpha * (v - last); return last }
-    }
-}
-
-/** ====== PAGER / PAGES ====== */
+// ===== Pager / pages =====
 
 @Composable
 private fun PagerRoot(
     availableSensors: List<String>,
     readings: Map<String, FloatArray>
 ) {
-    // 5-page layout: 0 Dashboard / 1 Coherence Glyph / 2 Compass / 3 Settings / 4 About
     val pagerState = rememberPagerState(pageCount = { 5 })
     Column(Modifier.fillMaxSize()) {
         HorizontalPager(
@@ -340,7 +302,7 @@ private fun DashboardPage(
     }
 
     Column(
-        Modifier.fillMaxSize().padding(10.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())
+        Modifier.fillMaxSize().padding(10.dp).verticalScroll(rememberScrollState())
     ) {
         Text("Sensor Dashboard", fontSize = 18.sp,
             modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally))
@@ -378,7 +340,6 @@ private fun DashboardPage(
                         val hz = values.getOrNull(2) ?: 0f
                         val mag = sqrt(hx*hx + hy*hy + hz*hz)
                         val heading = orientationDegState.value.getOrNull(0) ?: 0f
-                        // simple dial: strength bar + heading text
                         Text("Heading ${heading.toInt()}° • ${"%.1f".format(mag)} µT", fontSize = 11.sp)
                     }
                     "Light" -> InverseSquareLight(values.getOrNull(0) ?: 0f)
@@ -424,7 +385,6 @@ private fun DashboardPage(
     }
 }
 
-/** ====== LABELS ====== */
 private fun labelFor(type: Int): String = when (type) {
     Sensor.TYPE_ACCELEROMETER       -> "Accelerometer"
     Sensor.TYPE_GYROSCOPE           -> "Gyroscope"
