@@ -6,10 +6,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -21,11 +21,10 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlin.math.*
 
-/** ====== SHARED STATE / HELPERS (used across pages) ====== */
+// ===== Shared state / helpers =====
 
 val orientationDegState = mutableStateOf(floatArrayOf(0f, 0f, 0f))
 
-// Dynamic range helpers used by visuals
 val lightScale = AutoScaler(decay = 0.997f, floor = 0.1f, ceil = 40_000f)
 val magScale   = AutoScaler(decay = 0.995f, floor = 5f,   ceil = 150f)
 
@@ -53,7 +52,6 @@ class AutoScaler(
     }
 }
 
-// Lightweight histories used by a few visuals
 object SensorHistory {
     val gyroX = mutableStateListOf<Float>()
     val gyroY = mutableStateListOf<Float>()
@@ -77,21 +75,16 @@ fun DividerLine(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().height(1.dp).background(Color(0x22,0xFF,0xFF)))
 }
 
-/** ====== UI primitives we already used (kept stable) ====== */
+// ===== UI primitives =====
 
 @Composable
 fun WaitingPulseDots(label: String = "Listening") {
     var dots by remember { mutableStateOf(0) }
     val alpha = remember { Animatable(1f) }
     LaunchedEffect(Unit) {
-        while(true) {
-            alpha.animateTo(0.3f, tween(800))
-            alpha.animateTo(1f, tween(800))
-        }
+        while(true) { alpha.animateTo(0.3f, tween(800)); alpha.animateTo(1f, tween(800)) }
     }
-    LaunchedEffect(Unit) {
-        while(true) { delay(500); dots = (dots + 1) % 4 }
-    }
+    LaunchedEffect(Unit) { while(true) { delay(500); dots = (dots + 1) % 4 } }
     androidx.wear.compose.material.Text(
         "$label${".".repeat(dots)}",
         fontSize = 12.sp,
@@ -146,23 +139,20 @@ fun GyroWaveform(hx: List<Float>, hy: List<Float>, hz: List<Float>, range: Float
 
 @Composable
 fun GravityTuner(values: FloatArray) {
-    // ultra-sensitive gauge around 1g (9.81 m/s²)
     val g = magnitude(values)
     val center = 9.81f
-    val span = 0.30f // ±0.15g window
-    val norm = ((g - (center - span/2f)) / span).coerceIn(0f, 1f) // 0..1 across the window
+    val span = 0.30f
+    val norm = ((g - (center - span/2f)) / span).coerceIn(0f, 1f)
     Canvas(Modifier.fillMaxWidth().height(54.dp)) {
         val w = size.width; val h = size.height
         val cx = w/2f; val cy = h*0.65f
         val r = min(w,h)*0.45f
-        // arc track
         drawArc(
             color = Color(0x22,0xFF,0xFF),
             startAngle = 180f, sweepAngle = 180f, useCenter = false,
             topLeft = Offset(cx-r, cy-r), size = Size(r*2, r*2),
             style = Stroke(6f, cap = StrokeCap.Round)
         )
-        // needle
         val ang = 180f + 180f * norm
         val rad = ang * (Math.PI/180f).toFloat()
         val nx = cx + cos(rad)*r
@@ -230,7 +220,7 @@ fun RotationPseudo3D(x: Float, y: Float, z: Float) {
 @Composable fun InverseSquareLight(lux: Float) {
     val t = (ln(1f + lux) / ln(1f + 40_000f)).coerceIn(0f,1f)
     val inv = 1f - t
-    val emphasis = (1f - (inv*inv)) // inverse-square on the “darkness” side
+    val emphasis = (1f - (inv*inv))
     val bar = (0.15f + 0.85f*emphasis).coerceIn(0f,1f)
     NeonHeatBarNormalized(bar)
 }
