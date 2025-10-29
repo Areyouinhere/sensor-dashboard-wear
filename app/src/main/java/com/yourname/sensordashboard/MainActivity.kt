@@ -12,11 +12,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,10 +26,13 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
-import kotlin.math.*
+import kotlin.math.PI
+import kotlin.math.absoluteValue
+import kotlin.math.ln
+import kotlin.math.min
+import kotlin.math.sqrt
 
-// ===== Activity =====
-
+/** ====== ACTIVITY ====== */
 class MainActivity : ComponentActivity(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
@@ -69,6 +72,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         ensurePermissionsThenSubscribe()
     }
 
+    /** Micro-Weather Aura: light+pressure+humidity → soft background wash */
     private fun envAuraColor(): Color {
         val lux = readings["Light"]?.getOrNull(0) ?: 0f
         val p   = readings["Pressure"]?.getOrNull(0) ?: 1000f
@@ -77,7 +81,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         val tP   = ((p - 980f)/70f).coerceIn(0f,1f)
         val tRh  = (rh/100f).coerceIn(0f,1f)
         val r = (0.06f + 0.3f*tLux)
-        val g = (0.08f + 0.28f*(1f-abs(tP-0.5f)*2f))
+        val g = (0.08f + 0.28f*(1f- kotlin.math.abs(tP-0.5f)*2f))
         val b = (0.10f + 0.25f*tRh)
         return Color(r, g, b, alpha = 1f).copy(alpha = 0.25f)
     }
@@ -104,6 +108,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 
     private fun subscribeSensors(registerHeartRate: Boolean) {
         sensorManager.unregisterListener(this)
+
         fun reg(type: Int, delay: Int = SensorManager.SENSOR_DELAY_UI) {
             sensorManager.getDefaultSensor(type)?.let { s ->
                 sensorManager.registerListener(this, s, delay)
@@ -185,12 +190,15 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         computeOrientationDegrees()?.let { orientationDegState.value = it }
         readings[key] = event.values.copyOf()
 
+        // drive HRV rolling value into model
         CompassModel.pushHRV(HRVHistory.rmssd())
 
+        // micro-load hint
         if (event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION) {
             CompassModel.addMicroLoad(magnitude(event.values))
         }
 
+        // gravity anchor gesture (±5° level for ~3s)
         val ori = orientationDegState.value
         val pitch = ori.getOrNull(1)?.absoluteValue ?: 90f
         val roll  = ori.getOrNull(2)?.absoluteValue ?: 90f
@@ -207,6 +215,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             CompassModel.grounded.value = false
         }
 
+        // recompute composite/pulse
         CompassModel.recompute()
     }
 
@@ -241,13 +250,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     override fun onDestroy() { super.onDestroy(); sensorManager.unregisterListener(this) }
 }
 
-// ===== Pager / pages =====
+/** ====== PAGER / PAGES ====== */
 
 @Composable
 private fun PagerRoot(
     availableSensors: List<String>,
     readings: Map<String, FloatArray>
 ) {
+    // 5 pages: 0 Dashboard / 1 Coherence Glyph / 2 Compass / 3 Settings / 4 About
     val pagerState = rememberPagerState(pageCount = { 5 })
     Column(Modifier.fillMaxSize()) {
         HorizontalPager(
@@ -266,7 +276,7 @@ private fun PagerRoot(
         }
         Row(
             Modifier.fillMaxWidth().padding(bottom = 6.dp),
-            horizontalArrangement = Arrangement.Center
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center
         ) {
             repeat(5) { i ->
                 Box(
@@ -314,7 +324,10 @@ private fun DashboardPage(
         }
 
         items.forEach { (name, values) ->
-            androidx.wear.compose.material.Text(name, fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+            androidx.wear.compose.material.Text(
+                name, fontSize = 12.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+            )
             val txt = values.joinToString(limit = 3, truncated = "…") { v -> "%.2f".format(v) }
             Text(txt, fontSize = 10.sp, color = Color(0xAA, 0xFF, 0xFF))
             Box(
@@ -385,6 +398,7 @@ private fun DashboardPage(
     }
 }
 
+/** ====== LABELS ====== */
 private fun labelFor(type: Int): String = when (type) {
     Sensor.TYPE_ACCELEROMETER       -> "Accelerometer"
     Sensor.TYPE_GYROSCOPE           -> "Gyroscope"
