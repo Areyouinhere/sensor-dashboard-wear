@@ -1,13 +1,13 @@
 package com.yourname.sensordashboard
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.wear.compose.material.Switch
+import androidx.wear.compose.material.Text
 
 object AppSettings {
     var showCenterGlow by mutableStateOf(true)
