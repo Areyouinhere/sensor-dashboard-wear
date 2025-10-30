@@ -3,7 +3,6 @@ package com.yourname.sensordashboard
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -12,6 +11,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.wear.compose.material.Text
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.min
@@ -23,21 +23,17 @@ fun CompassPage(readings: Map<String, FloatArray>) {
     val pulse by CompassModel.pulseSignal
     val grounded by CompassModel.grounded
 
-    // Gravity Anchor Gesture: watch level ±5° for ~3s
+    // Gravity Anchor Gesture: hold level ±5° for ~3s
     LaunchedEffect(orientationDegState.value) {
         val ori = orientationDegState.value
         val pitch = ori.getOrNull(1)?.let { abs(it) } ?: 0f
         val roll  = ori.getOrNull(2)?.let { abs(it) } ?: 0f
         if (pitch < 5f && roll < 5f) {
             delay(3000)
-            // Re-check after delay to ensure it stayed steady
             val again = orientationDegState.value
             val p2 = again.getOrNull(1)?.let { abs(it) } ?: 0f
             val r2 = again.getOrNull(2)?.let { abs(it) } ?: 0f
-            if (p2 < 5f && r2 < 5f) {
-                CompassModel.grounded.value = true
-                // optional: haptic cue later
-            }
+            CompassModel.grounded.value = (p2 < 5f && r2 < 5f)
         } else {
             CompassModel.grounded.value = false
         }
@@ -52,8 +48,8 @@ fun CompassPage(readings: Map<String, FloatArray>) {
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
                     onVerticalDrag = { _, dragAmount ->
-                        if (dragAmount < -12f) showTrend = true   // swipe up
-                        if (dragAmount > 12f)  showTrend = false  // swipe down
+                        if (dragAmount < -12f) showTrend = true
+                        if (dragAmount > 12f)  showTrend = false
                     }
                 )
             }
@@ -63,7 +59,6 @@ fun CompassPage(readings: Map<String, FloatArray>) {
         Spacer(Modifier.height(6.dp)); DividerLine(); Spacer(Modifier.height(8.dp))
 
         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-            // Dial with moment pulse and confidence outline
             Canvas(Modifier.fillMaxWidth().height(180.dp)) {
                 val cx = size.width/2f
                 val cy = size.height/2f
@@ -85,7 +80,6 @@ fun CompassPage(readings: Map<String, FloatArray>) {
                 drawCircle(Color(0xFF,0xF0,0xAA).copy(alpha = 0.20f + 0.50f * pulse), radius = halo, center = Offset(cx, cy))
             }
 
-            // grounded badge
             if (grounded) {
                 Text("Grounded", color = Color(0xFF,0xF0,0xAA), fontSize = 12.sp,
                     modifier = Modifier.align(Alignment.TopCenter))
