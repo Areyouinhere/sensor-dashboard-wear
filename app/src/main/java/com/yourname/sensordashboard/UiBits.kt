@@ -1,15 +1,15 @@
 package com.yourname.sensordashboard
 
-import android.content.Context
-import android.hardware.Sensor
-import android.hardware.SensorManager
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -19,101 +19,186 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.wear.compose.material.Text
-import kotlinx.coroutines.delay
-import kotlin.math.*
+import androidx.wear.compose.material.MaterialTheme
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
-/** ---------- Formatting / math helpers ---------- */
-val orientationDegState = mutableStateOf(floatArrayOf(0f,0f,0f))
-val lightScale = AutoScaler(decay = 0.997f, floor = 0.1f, ceil = 40_000f)
-val magScale   = AutoScaler(decay = 0.995f, floor = 5f,   ceil = 150f)
+/* ---------------- Visual primitives & helpers shared across pages ---------------- */
 
-fun magnitude(v: FloatArray): Float = sqrt(v.fold(0f) { s, x -> s + x*x })
+@Composable fun DividerLine() {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x22,0xFF,0xFF)))
+}
+
 fun fmtPct(v: Float): String = "${(v.coerceIn(0f,1f)*100f).roundToInt()}%"
-fun fmtMs(v: Float): String  = "${v.roundToInt()} ms"
+fun fmtMs(v: Float): String  = "${v.coerceIn(0f, 9999f).roundToInt()} ms"
 fun fmt1(v: Float): String   = "%.1f".format(v.coerceIn(0f,1f))
 
-class AutoScaler(private val decay: Float = 0.995f, private val floor: Float = 0.1f, private val ceil: Float = 100f) {
-    private var hi = floor; private var lo = floor
-    fun norm(value: Float): Float {
-        if (!value.isFinite()) return 0f
-        if (value > hi) hi = min(value, ceil)
-        if (value < lo) lo = max(value, floor)
-        hi = max(hi * decay, value); lo = min(lo / decay, value)
-        val span = (hi - lo).coerceAtLeast(1e-3f)
-        return ((value - lo) / span).coerceIn(0f, 1f)
+@Composable
+fun PagerDots(total: Int, current: Int) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 6.dp),
+        horizontalArrangement = Arrangement.Center
+    ) {
+        repeat(total) { i ->
+            Box(
+                Modifier.size(if (current == i) 8.dp else 6.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(if (current == i) Color(0xFF, 0xD7, 0x00) else Color(0x44, 0xFF, 0xFF))
+            )
+            if (i != total - 1) Spacer(Modifier.width(6.dp))
+        }
     }
 }
 
-/** ---------- App settings (wired in UI) ---------- */
-object AppSettings {
-    var showParallax by mutableStateOf(true)
-    var showAura by mutableStateOf(true)
-    var showCenterGlow by mutableStateOf(true)
-    var toneEnabled by mutableStateOf(true)
-    var hapticsEnabled by mutableStateOf(true)
-    // page toggles (keep at least one)
-    var showPageDash by mutableStateOf(true)
-    var showPageGlyph by mutableStateOf(true)
-    var showPageCompass by mutableStateOf(true)
-    var showPageSettings by mutableStateOf(true)
-    var showPageAbout by mutableStateOf(true)
-}
+/* ---------------- Dashboard page ---------------- */
 
-/** ---------- Rolling history buffers ---------- */
-object SensorHistory {
-    val gyroX = mutableStateListOf<Float>()
-    val gyroY = mutableStateListOf<Float>()
-    val gyroZ = mutableStateListOf<Float>()
-    val accel = mutableStateListOf<Float>()
-    val grav  = mutableStateListOf<Float>()
-    val light = mutableStateListOf<Float>()
-    private fun push(list: MutableList<Float>, v: Float, max: Int = 180) {
-        if (list.size >= max) list.removeAt(0); list.add(v)
+@Composable
+fun DashboardPage(availableSensors: List<String>, readings: Map<String, FloatArray>) {
+    val ordered = listOf(
+        "Accelerometer","Linear Accel","Gravity","Gyroscope",
+        "Rotation Vector","Magnetic","Light","Pressure",
+        "Humidity","Ambient Temp","Heart Rate","HRV","Step Counter"
+    )
+    val items by remember {
+        derivedStateOf {
+            val base = readings.toMutableMap()
+            base["HRV"] = floatArrayOf(HRVHistory.rmssd())
+            base.entries.sortedWith(
+                compareBy(
+                    { ordered.indexOf(it.key).let { i -> if (i == -1) Int.MAX_VALUE else i } },
+                    { it.key })
+            )
+        }
     }
-    fun pushGyro(x: Float, y: Float, z: Float) { push(gyroX, x); push(gyroY, y); push(gyroZ, z) }
-    fun pushAccel(m: Float) = push(accel, m)
-    fun pushGrav(m: Float)  = push(grav, m)
-    fun pushLight(l: Float) = push(light, l)
+    Column(
+        Modifier.fillMaxSize().padding(10.dp).verticalScroll(rememberScrollState())
+    ) {
+        Text(
+            "Sensor Dashboard", fontSize = 18.sp,
+            color = Color.White, modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
+        Spacer(Modifier.height(4.dp)); DividerLine(); Spacer(Modifier.height(8.dp))
+
+        if (readings.isEmpty()) {
+            WaitingPulseDots(); Spacer(Modifier.height(16.dp))
+        }
+
+        items.forEach { (name, values) ->
+            SensorCard(name, values)
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text("Available Sensors (${availableSensors.size})", fontSize = 12.sp, color = Color(0xCC,0xFF,0xFF))
+        availableSensors.take(20).forEach { line -> Text(line, fontSize = 11.sp, color = Color(0x99,0xFF,0xFF)) }
+    }
 }
 
-/** ---------- Small UI bits ---------- */
-@Composable fun DividerLine(mod: Modifier = Modifier) {
-    Box(mod.fillMaxWidth().height(1.dp).background(Color(0x22,0xFF,0xFF)))
+@Composable
+private fun SensorCard(name: String, values: FloatArray) {
+    Text(name, fontSize = 12.sp, color = Color.White)
+    LiveValuesLine(values)
+    Box(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(Color(0x10, 0xFF, 0xFF)).padding(8.dp)
+    ) {
+        when (name) {
+            "Gyroscope" -> GyroWaveform(SensorHistory.gyroX, SensorHistory.gyroY, SensorHistory.gyroZ)
+            "Gravity"   -> GravityTuner(values)
+            "Linear Accel" -> CenteredZeroBar(magnitude(values), visualRange = 4f)
+            "Rotation Vector" -> {
+                val ori = orientationDegState.value
+                RotationPseudo3D(
+                    x = ori.getOrNull(2) ?: 0f,
+                    y = ori.getOrNull(1) ?: 0f,
+                    z = (ori.getOrNull(0) ?: 0f) / 360f
+                )
+            }
+            "Magnetic" -> {
+                val hx = values.getOrNull(0) ?: 0f
+                val hy = values.getOrNull(1) ?: 0f
+                val hz = values.getOrNull(2) ?: 0f
+                val mag = kotlin.math.sqrt(hx*hx + hy*hy + hz*hz)
+                val heading = orientationDegState.value.getOrNull(0) ?: 0f
+                MagneticDial(heading = heading, strengthNorm = magScale.norm(mag))
+            }
+            "Light" -> InverseSquareLight(values.getOrNull(0) ?: 0f)
+            "Heart Rate" -> {
+                val bpm = values.getOrNull(0) ?: 0f; HeartPulse(bpm = bpm.coerceIn(30f, 200f))
+            }
+            "HRV" -> {
+                val rmssd = values.getOrNull(0) ?: 0f
+                CenteredZeroBar(rmssd - 50f, visualRange = 80f)
+            }
+            "Step Counter" -> {
+                val raw = values.getOrNull(0) ?: 0f
+                val session = values.getOrNull(1) ?: 0f
+                StepsRow(raw, session)
+            }
+            else -> NeonHeatBar(name, values)
+        }
+    }
+    Spacer(Modifier.height(10.dp))
 }
 
-@Composable fun WaitingPulseDots(label: String = "Listening") {
+@Composable private fun LiveValuesLine(values: FloatArray) {
+    val txt = values.joinToString(limit = 3, truncated = "…") { v -> "%.2f".format(v) }
+    Text(txt, fontSize = 10.sp, color = Color(0xAA, 0xFF, 0xFF))
+}
+
+/* ---------- Re-usable visuals (unchanged from your last stable, with small fixes) ---------- */
+
+@Composable private fun WaitingPulseDots() {
     var dots by remember { mutableStateOf(0) }
     val alpha = remember { Animatable(1f) }
     LaunchedEffect(Unit) {
-        while(true){ alpha.animateTo(0.3f, tween(800)); alpha.animateTo(1f, tween(800)) }
+        while (true) {
+            alpha.animateTo(0.3f, tween(800))
+            alpha.animateTo(1f, tween(800))
+            dots = (dots + 1) % 4
+        }
     }
-    LaunchedEffect(Unit) { while(true){ delay(500); dots = (dots + 1) % 4 } }
-    Text("$label${".".repeat(dots)}", fontSize = 12.sp, color = Color.Gray.copy(alpha = alpha.value))
+    Text("Listening" + ".".repeat(dots), fontSize = 12.sp, color = Color.Gray.copy(alpha = alpha.value))
 }
 
-/** ---------- Restored visuals ---------- */
-@Composable
-fun NeonHeatBarNormalized(norm: Float) {
+@Composable private fun NeonHeatBar(name: String, values: FloatArray) {
+    val mag = magnitude(values)
+    val scale = when (name) {
+        "Accelerometer" -> 8f
+        "Linear Accel"  -> 4f
+        "Gravity"       -> 1.2f
+        "Gyroscope"     -> 4f
+        "Rotation Vector" -> 1.5f
+        "Light"         -> 800f
+        "Magnetic"      -> 80f
+        "Humidity"      -> 100f
+        "Ambient Temp"  -> 40f
+        "Heart Rate"    -> 160f
+        "Pressure"      -> 60f
+        "Step Counter"  -> 20_000f
+        "HRV"           -> 80f
+        else -> 50f
+    }
+    NeonHeatBarNormalized((mag / scale).coerceIn(0f, 1f))
+}
+
+@Composable private fun NeonHeatBarNormalized(norm: Float) {
     val anim = remember { Animatable(0f) }
     LaunchedEffect(norm) { anim.animateTo(norm.coerceIn(0f, 1f), tween(220)) }
     val track = Color(0x33,0xFF,0xFF); val glow = Color(0x66,0x00,0xEA); val core = Color(0xFF,0xD7,0x00)
     Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(track)) {
         Box(Modifier.fillMaxWidth(anim.value).height(10.dp).background(glow.copy(alpha = 0.6f)))
-        Box(
-            Modifier.fillMaxWidth((anim.value*0.98f).coerceAtLeast(0.02f))
-                .height(6.dp).padding(vertical = 2.dp)
-                .clip(RoundedCornerShape(3.dp)).background(core)
-        )
+        Box(Modifier.fillMaxWidth((anim.value*0.98f).coerceAtLeast(0.02f)).height(6.dp)
+            .padding(vertical = 2.dp).clip(RoundedCornerShape(3.dp)).background(core))
     }
 }
 
-@Composable
-fun GyroWaveform(hx: List<Float>, hy: List<Float>, hz: List<Float>, range: Float = 6f) {
+@Composable private fun GyroWaveform(hx: List<Float>, hy: List<Float>, hz: List<Float>, range: Float = 6f) {
     Canvas(Modifier.fillMaxWidth().height(64.dp)) {
         val w = size.width; val h = size.height; val mid = h/2f
         fun mapY(v: Float): Float { val c = v.coerceIn(-range, range); return mid - (c/range)*(h*0.45f) }
@@ -123,11 +208,11 @@ fun GyroWaveform(hx: List<Float>, hy: List<Float>, hz: List<Float>, range: Float
         for (i in 1 until columns) drawLine(grid.copy(alpha = 0.15f), Offset(stepX*i,0f), Offset(stepX*i,h), 1f)
         fun drawSeries(series: List<Float>, core: Color) {
             if (series.size < 2) return
-            val step = w / (series.size - 1).coerceAtLeast(1)
+            val step = w/ (series.size-1).coerceAtLeast(1)
             var prev = Offset(0f, mapY(series[0]))
             for (i in 1 until series.size) {
-                val x = step * i; val y = mapY(series[i])
-                drawLine(core.copy(alpha=0.9f), prev, Offset(x,y), 2f); prev = Offset(x,y)
+                val x = step*i; val y = mapY(series[i])
+                drawLine(core, prev, Offset(x,y), 2f); prev = Offset(x,y)
             }
         }
         val gold = Color(0xFF,0xD7,0x00); val violet = Color(0x66,0x00,0xEA); val cyan = Color(0x00,0xD0,0xFF)
@@ -135,57 +220,55 @@ fun GyroWaveform(hx: List<Float>, hy: List<Float>, hz: List<Float>, range: Float
     }
 }
 
-@Composable
-fun GravityTuner(values: FloatArray) {
-    val g = magnitude(values); val center = 9.81f; val span = 0.30f
+@Composable private fun GravityTuner(values: FloatArray) {
+    val g = magnitude(values)
+    val center = 9.81f
+    val span = 0.30f
     val norm = ((g - (center - span/2f)) / span).coerceIn(0f, 1f)
     Canvas(Modifier.fillMaxWidth().height(54.dp)) {
-        val w = size.width; val h = size.height; val cx = w/2f; val cy = h*0.65f; val r = min(w,h)*0.45f
-        drawArc(
-            color = Color(0x22,0xFF,0xFF),
-            startAngle = 180f, sweepAngle = 180f, useCenter = false,
-            topLeft = Offset(cx-r, cy-r), size = Size(r*2, r*2),
-            style = Stroke(width = 6f, cap = StrokeCap.Round)
-        )
-        val ang = 180f + 180f * norm; val rad = ang * (Math.PI/180f).toFloat()
-        val nx = cx + cos(rad)*r; val ny = cy + sin(rad)*r
+        val w = size.width; val h = size.height
+        val cx = w/2f; val cy = h*0.65f
+        val r = min(w,h)*0.45f
+        drawArc(Color(0x22,0xFF,0xFF), 180f, 180f, false,
+            topLeft = Offset(cx-r, cy-r), size = Size(r*2, r*2), style = Stroke(6f, StrokeCap.Round))
+        val ang = 180f + 180f * norm
+        val rad = ang * (PI/180f).toFloat()
+        val nx = cx + kotlin.math.cos(rad)*r
+        val ny = cy + kotlin.math.sin(rad)*r
         drawLine(Color(0xFF,0xD7,0x00), Offset(cx,cy), Offset(nx,ny), 4f)
     }
 }
 
-@Composable fun StepsRow(raw: Float, session: Float) {
+@Composable private fun StepsRow(raw: Float, session: Float) {
     Column {
         Text("Raw: ${raw.toInt()} • Session: ${session.toInt()}", fontSize = 11.sp, color = Color(0xCC,0xFF,0xFF))
-        NeonHeatBarNormalized((session / 12_000f).coerceIn(0f,1f))
+        val norm = (session / 12_000f).coerceIn(0f,1f)
+        NeonHeatBarNormalized(norm)
     }
 }
 
-@Composable
-fun CenteredZeroBar(value: Float, visualRange: Float) {
+@Composable private fun CenteredZeroBar(value: Float, visualRange: Float) {
     val clamped = (value / visualRange).coerceIn(-1f, 1f)
     val anim = remember { Animatable(0f) }
     LaunchedEffect(clamped) { anim.animateTo(clamped, tween(220)) }
     val track = Color(0x22,0xFF,0xFF); val negGlow = Color(0x66,0x00,0xEA); val posGlow = Color(0xFF,0xD7,0x00)
     Box(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(track)) {
         val half = 0.5f; val amt = abs(anim.value)*half
-        Box(
-            Modifier.fillMaxWidth(half + amt).height(14.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .background(if (anim.value >= 0f) posGlow.copy(alpha=0.35f) else negGlow.copy(alpha=0.35f))
-        )
-        Box(
-            Modifier.fillMaxWidth(half + amt*0.92f).height(10.dp).padding(vertical=2.dp)
-                .clip(RoundedCornerShape(5.dp)).background(if (anim.value >= 0f) posGlow else negGlow)
-        )
+        Box(Modifier.fillMaxWidth(half + amt).height(14.dp).clip(RoundedCornerShape(7.dp))
+            .background(if (anim.value >= 0f) posGlow.copy(alpha=0.35f) else negGlow.copy(alpha=0.35f)))
+        Box(Modifier.fillMaxWidth(half + amt*0.92f).height(10.dp).padding(vertical=2.dp)
+            .clip(RoundedCornerShape(5.dp)).background(if (anim.value >= 0f) posGlow else negGlow))
     }
 }
 
-@Composable
-fun RotationPseudo3D(x: Float, y: Float, z: Float) {
-    val pitchDeg = y.coerceIn(-30f, 30f); val rollDeg  = x.coerceIn(-30f, 30f)
-    val tiltX = sin(rollDeg * (Math.PI / 180f).toFloat()); val tiltY = sin(pitchDeg * (Math.PI / 180f).toFloat())
+@Composable private fun RotationPseudo3D(x: Float, y: Float, z: Float) {
+    val pitchDeg = y.coerceIn(-30f, 30f)
+    val rollDeg  = x.coerceIn(-30f, 30f)
+    val tiltX = kotlin.math.sin(rollDeg * (Math.PI / 180f).toFloat())
+    val tiltY = kotlin.math.sin(pitchDeg * (Math.PI / 180f).toFloat())
     Canvas(Modifier.fillMaxWidth().height(72.dp)) {
-        val w = size.width; val h = size.height; val cx = w/2f; val cy = h/2f
+        val w = size.width; val h = size.height
+        val cx = w/2f; val cy = h/2f
         val rw = w*0.6f; val rh = h*0.5f
         val base = Color(0x22,0xFF,0xFF); val core = Color(0xFF,0xD7,0x00)
         val dx = tiltX*10f; val dy = tiltY*8f
@@ -203,87 +286,45 @@ fun RotationPseudo3D(x: Float, y: Float, z: Float) {
     }
 }
 
-@Composable fun InverseSquareLight(lux: Float) {
-    val t = (ln(1f + lux) / ln(1f + 40_000f)).coerceIn(0f,1f)
-    val inv = 1f - t; val emphasis = (1f - (inv*inv))
-    NeonHeatBarNormalized((0.15f + 0.85f*emphasis).coerceIn(0f,1f))
+@Composable private fun InverseSquareLight(lux: Float) {
+    val t = (kotlin.math.ln(1f + lux) / kotlin.math.ln(1f + 40_000f)).coerceIn(0f,1f)
+    val inv = 1f - t
+    val emphasis = (1f - (inv*inv))
+    val bar = (0.15f + 0.85f*emphasis).coerceIn(0f,1f)
+    NeonHeatBarNormalized(bar)
 }
+
+/* ------------ Small chart for trends page & compass swipe-up ------------- */
 
 @Composable
-fun MagneticDial(heading: Float, strengthNorm: Float) {
-    Canvas(Modifier.fillMaxWidth().height(72.dp)) {
-        val cx = size.width/2f; val cy = size.height/2f
-        val r = min(size.width, size.height)*0.42f
-        drawArc(
-            color = Color(0x22,0xFF,0xFF),
-            startAngle = -90f, sweepAngle = 360f, useCenter = false,
-            topLeft = Offset(cx-r, cy-r), size = Size(r*2, r*2),
-            style = Stroke(width = 6f, cap = StrokeCap.Round)
-        )
-        val ang = ((heading + 360f) % 360f) - 90f
-        val rad = ang * (Math.PI/180f).toFloat()
-        val nx = cx + cos(rad)*r; val ny = cy + sin(rad)*r
-        val col = Color(0xFF,0xD7,0x00)
-        drawLine(col, Offset(cx,cy), Offset(nx,ny), 4f)
-        val bar = strengthNorm.coerceIn(0f,1f)
-        drawLine(Color(0x33,0xFF,0xFF), Offset(cx-r, cy+r+6f), Offset(cx+r, cy+r+6f), 6f)
-        drawLine(Color(0x66,0x00,0xEA), Offset(cx-r, cy+r+6f), Offset(cx-r + (2*r)*bar, cy+r+6f), 6f)
-    }
-}
-
-@Composable fun HeartPulse(bpm: Float) {
-    val t = (bpm.coerceIn(30f, 200f) - 30f) / 170f
-    NeonHeatBarNormalized(t)
-}
-
-/** Sensor info header uses LocalContext to obtain SensorManager (avoids needing a captured instance) */
-@Composable
-fun SensorInfoHeader(name: String) {
-    val ctx = LocalContext.current
-    val sm = remember(ctx) { ctx.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
-    var open by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            Text(if (open) "Hide" else "Info", fontSize = 10.sp, modifier = Modifier.clickable { open = !open })
-        }
-        if (open) {
-            val type = when (name) {
-                "Accelerometer" -> Sensor.TYPE_ACCELEROMETER
-                "Gyroscope" -> Sensor.TYPE_GYROSCOPE
-                "Linear Accel" -> Sensor.TYPE_LINEAR_ACCELERATION
-                "Gravity" -> Sensor.TYPE_GRAVITY
-                "Rotation Vector" -> Sensor.TYPE_ROTATION_VECTOR
-                "Magnetic" -> Sensor.TYPE_MAGNETIC_FIELD
-                "Light" -> Sensor.TYPE_LIGHT
-                "Pressure" -> Sensor.TYPE_PRESSURE
-                "Humidity" -> Sensor.TYPE_RELATIVE_HUMIDITY
-                "Ambient Temp" -> Sensor.TYPE_AMBIENT_TEMPERATURE
-                "Heart Rate" -> Sensor.TYPE_HEART_RATE
-                "Step Counter" -> Sensor.TYPE_STEP_COUNTER
-                else -> -1
-            }
-            val s = if (type != -1) sm.getDefaultSensor(type) else null
-            Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 6.dp)) {
-                Text(s?.name ?: "—", fontSize = 10.sp, color = Color(0xCC,0xFF,0xFF))
-                Text("Vendor: ${s?.vendor ?: "—"}  Ver: ${s?.version ?: "—"}", fontSize = 10.sp, color = Color(0x99,0xFF,0xFF))
-                Text("Power: ${s?.power ?: "—"} mA  Res: ${s?.resolution ?: "—"}", fontSize = 10.sp, color = Color(0x99,0xFF,0xFF))
-                Text("Range: ${s?.maximumRange ?: "—"}", fontSize = 10.sp, color = Color(0x99,0xFF,0xFF))
-            }
+fun QuickSparkline(data: List<Float>, modifier: Modifier = Modifier, color: Color = Color(0xFF,0xD7,0x00)) {
+    Canvas(modifier.height(48.dp).fillMaxWidth()) {
+        if (data.isEmpty()) return@Canvas
+        val w = size.width; val h = size.height
+        val n = data.size
+        val minV = data.minOrNull() ?: 0f
+        val maxV = data.maxOrNull() ?: 1f
+        val span = (maxV - minV).coerceAtLeast(1e-3f)
+        var prev = Offset(0f, h - ((data[0] - minV)/span)*h)
+        for (i in 1 until n) {
+            val x = w * (i/(n-1).toFloat())
+            val y = h - ((data[i] - minV)/span)*h
+            val cur = Offset(x, y)
+            drawLine(color, prev, cur, 2f)
+            prev = cur
         }
     }
 }
 
-/** Background grid */
+/* ---------------- Trends Page ---------------- */
+
 @Composable
-fun MicrogridParallax() {
-    if (!AppSettings.showParallax) return
-    var phase by remember { mutableStateOf(0f) }
-    LaunchedEffect(Unit) { while (true) { delay(24L); phase = (phase + 0.6f) % 20f } }
-    Canvas(Modifier.fillMaxSize()) {
-        val spacing = 20f; val w = size.width; val h = size.height
-        val line = Color(0x13,0xFF,0xFF)
-        var x = -phase; while (x < w) { drawLine(line, Offset(x,0f), Offset(x,h), 1f); x += spacing }
-        var y = -phase; while (y < h) { drawLine(line, Offset(0f,y), Offset(w,y), 1f); y += spacing }
+fun TrendsPage() {
+    Column(Modifier.fillMaxSize().padding(12.dp)) {
+        Text("Coherence Trends", color = Color.White, fontSize = 16.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+        Spacer(Modifier.height(6.dp)); DividerLine(); Spacer(Modifier.height(8.dp))
+        QuickSparkline(CompassModel.coherenceHistory)
+        Spacer(Modifier.height(8.dp))
+        Text("Last ${CompassModel.coherenceHistory.size} pts • Current ${fmtPct(CompassModel.composite.value)}", color = Color(0xCC,0xFF,0xFF), fontSize = 12.sp)
     }
 }
