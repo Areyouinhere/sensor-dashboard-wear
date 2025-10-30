@@ -4,12 +4,10 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,14 +20,14 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.MaterialTheme
+import androidx.wear.compose.material.Text
 import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sin
+import kotlin.math.sqrt
 
-/* ---------------- Visual primitives & helpers shared across pages ---------------- */
+/* ------ Shared UI bits for all pages. Do not duplicate these anywhere else. ------ */
 
 @Composable fun DividerLine() {
     Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x22,0xFF,0xFF)))
@@ -123,7 +121,7 @@ private fun SensorCard(name: String, values: FloatArray) {
                 val hx = values.getOrNull(0) ?: 0f
                 val hy = values.getOrNull(1) ?: 0f
                 val hz = values.getOrNull(2) ?: 0f
-                val mag = kotlin.math.sqrt(hx*hx + hy*hy + hz*hz)
+                val mag = sqrt(hx*hx + hy*hy + hz*hz)
                 val heading = orientationDegState.value.getOrNull(0) ?: 0f
                 MagneticDial(heading = heading, strengthNorm = magScale.norm(mag))
             }
@@ -151,7 +149,7 @@ private fun SensorCard(name: String, values: FloatArray) {
     Text(txt, fontSize = 10.sp, color = Color(0xAA, 0xFF, 0xFF))
 }
 
-/* ---------- Re-usable visuals (unchanged from your last stable, with small fixes) ---------- */
+/* ---------- Re-usable visuals ---------- */
 
 @Composable private fun WaitingPulseDots() {
     var dots by remember { mutableStateOf(0) }
@@ -212,7 +210,8 @@ private fun SensorCard(name: String, values: FloatArray) {
             var prev = Offset(0f, mapY(series[0]))
             for (i in 1 until series.size) {
                 val x = step*i; val y = mapY(series[i])
-                drawLine(core, prev, Offset(x,y), 2f); prev = Offset(x,y)
+                val cur = Offset(x,y)
+                drawLine(core, prev, cur, 2f); prev = cur
             }
         }
         val gold = Color(0xFF,0xD7,0x00); val violet = Color(0x66,0x00,0xEA); val cyan = Color(0x00,0xD0,0xFF)
@@ -292,6 +291,33 @@ private fun SensorCard(name: String, values: FloatArray) {
     val emphasis = (1f - (inv*inv))
     val bar = (0.15f + 0.85f*emphasis).coerceIn(0f,1f)
     NeonHeatBarNormalized(bar)
+}
+
+/* ---- Missing pieces you wanted back: MagneticDial + HeartPulse ---- */
+
+@Composable
+fun MagneticDial(heading: Float, strengthNorm: Float) {
+    Canvas(Modifier.fillMaxWidth().height(72.dp)) {
+        val w = size.width; val h = size.height
+        val cx = w/2f; val cy = h/2f
+        val r = min(w,h)*0.42f
+        // track
+        drawCircle(Color(0x22,0xFF,0xFF), radius = r, center = Offset(cx,cy), style = Stroke(6f, StrokeCap.Round))
+        // north marker
+        val ang = (-90f + heading).coerceIn(-3600f,3600f) * (PI/180f).toFloat()
+        val nx = cx + kotlin.math.cos(ang)*r
+        val ny = cy + kotlin.math.sin(ang)*r
+        drawLine(Color(0xFF,0xD7,0x00), Offset(cx,cy), Offset(nx,ny), 4f)
+        // strength ring
+        val inner = r * (0.35f + 0.55f*strengthNorm.coerceIn(0f,1f))
+        drawCircle(Color(0x66,0x00,0xEA).copy(alpha = 0.30f + 0.50f*strengthNorm), radius = inner, center = Offset(cx, cy))
+    }
+}
+
+@Composable
+fun HeartPulse(bpm: Float) {
+    val norm = ((bpm - 45f)/ (150f-45f)).coerceIn(0f,1f)
+    NeonHeatBarNormalized(0.3f + 0.7f*norm)
 }
 
 /* ------------ Small chart for trends page & compass swipe-up ------------- */
