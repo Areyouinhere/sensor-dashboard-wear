@@ -2,7 +2,11 @@ package com.yourname.sensordashboard
 
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import kotlin.math.*
+import kotlin.math.absoluteValue
+import kotlin.math.ln
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.pow
 
 class Rolling(private val alpha: Float, init: Float = 0f) {
     private var v = init
@@ -19,20 +23,20 @@ object CompassModel {
     val coherenceHistory = mutableStateListOf<Float>()
     private const val HISTORY_MAX = 240
 
-    private val rollHRV = Rolling(0.15f)
-    private val rollHR  = Rolling(0.10f)
-    private val rollGyro= Rolling(0.12f)
-    private val rollAccel=Rolling(0.12f)
-    private val rollPress=Rolling(0.08f)
-    private val rollLight=Rolling(0.06f)
+    private val rollHRV   = Rolling(0.15f)
+    private val rollHR    = Rolling(0.10f)
+    private val rollGyro  = Rolling(0.12f)
+    private val rollAccel = Rolling(0.12f)
+    private val rollPress = Rolling(0.08f)
+    private val rollLight = Rolling(0.06f)
     private val microLoad = Rolling(0.05f)
 
     private var lastPulseBase = 0f
 
-    fun pushHR(bpm: Float)       { rollHR.push(bpm.coerceAtLeast(0f)) }
-    fun pushHRV(rmssd: Float)    { rollHRV.push(rmssd.coerceAtLeast(0f)) }
-    fun pushGyroMag(m: Float)    { rollGyro.push(m) }
-    fun pushAccelMag(m: Float)   { rollAccel.push(m) }
+    fun pushHR(bpm: Float)       { rollHR.push(max(0f, bpm)) }
+    fun pushHRV(rmssd: Float)    { rollHRV.push(max(0f, rmssd)) }
+    fun pushGyroMag(m: Float)    { rollGyro.push(max(0f, m)) }
+    fun pushAccelMag(m: Float)   { rollAccel.push(max(0f, m)) }
     fun pushPressure(p: Float)   { rollPress.push(p) }
     fun pushLight(lux: Float)    { rollLight.push(lux) }
     fun addMicroLoad(m: Float)   { microLoad.push(m) }
@@ -64,16 +68,18 @@ object CompassModel {
         val nP     = ((rollPress.value() - 980f)/70f).coerceIn(0f,1f)
         val hrv    = rollHRV.value()
 
+        // HRV remodel: banded optimal zone
         val hrvBand = bandedPeak(hrv, low = 25f, high = 90f)
 
+        // Confidence (motion gated)
         val motionPenalty = (nGyro * 0.8f + nAccel * 0.2f).coerceIn(0f,1f)
         val conf = softKnee(1f - motionPenalty, knee = 0.6f)
         confidence.value = conf
 
-        val hrCentered    = softKnee(1f - abs(nHR - 0.5f)*2f, knee = 0.55f)
+        val hrCentered    = softKnee(1f - kotlin.math.abs(nHR - 0.5f)*2f, knee = 0.55f)
         val motionStable  = softKnee(1f - nGyro, knee = 0.5f)
         val accelPresence = softKnee(nAccel, knee = 0.65f)
-        val envBalance    = softKnee(1f - abs(nP - 0.5f)*2f, knee = 0.5f)
+        val envBalance    = softKnee(1f - kotlin.math.abs(nP - 0.5f)*2f, knee = 0.5f)
 
         val base = (0.35f*hrvBand + 0.22f*hrCentered + 0.23f*motionStable +
                     0.10f*accelPresence + 0.10f*envBalance).coerceIn(0f,1f)
@@ -82,6 +88,7 @@ object CompassModel {
         val comp = (base * (0.7f + 0.3f*conf) * loadMod).coerceIn(0f,1f)
         composite.value = comp
 
+        // Moment Signature Pulse (delta on hrv/accel/light)
         val pulseBase = (0.5f * (rollHRV.value()/90f).coerceIn(0f,1f)
                 + 0.3f * nAccel
                 + 0.2f * (ln(1f + rollLight.value()) / ln(1f + 40_000f)).coerceIn(0f,1f))
